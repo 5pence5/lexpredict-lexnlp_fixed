@@ -139,7 +139,7 @@ class SectionSegmentizerTrainManager:
 
     def train_logistic_regression(self):
         # Build model
-        model_log = sklearn.linear_model.LogisticRegression(penalty='l1', C=10.0, solver='lbfgs')
+        model_log = sklearn.linear_model.LogisticRegression(penalty='l1', C=10.0, solver='liblinear')
         model_log.fit(self.feature_df, self.target_data)
 
         # Assess model
@@ -231,16 +231,22 @@ class SectionSegmentizerTrainManager:
         # Feature vector
         v = {}
 
-        # Check start offset
-        if line_id < self.line_window_pre:
-            self.line_window_pre = line_id
+        # Determine the available context window for the current line without
+        # mutating the configured defaults.  The previous implementation stored
+        # the adjusted window sizes back on the instance, which meant that once
+        # a short window was encountered every subsequent call would also use
+        # the shortened window.  That effectively removed almost all look-back
+        # information from the training features after the first couple of
+        # lines and produced poor models.  Instead, compute the local window
+        # sizes per call.
+        line_window_pre = min(self.line_window_pre, line_id)
+        remaining_after = len(lines) - line_id - 1
+        line_window_post = min(self.line_window_post, max(0, remaining_after))
 
-        # Check final offset
-        if (line_id + self.line_window_post) >= len(lines):
-            self.line_window_post = len(lines) - self.line_window_post - 1
+        target_line = lines[line_id]
 
         # Iterate through window
-        for i in range(-self.line_window_pre, self.line_window_post + 1):
+        for i in range(-line_window_pre, line_window_post + 1):
             try:
                 line = lines[line_id + i]
             except IndexError:
@@ -258,26 +264,29 @@ class SectionSegmentizerTrainManager:
             v["line_n_punct_{0}".format(i)] = sum([1 for c in line if unicodedata.category(c).startswith("P")])
             v["line_n_whitespace_{0}".format(i)] = sum([1 for c in line if unicodedata.category(c).startswith("Z")])
 
-        # Simple checks
-        v["section"] = 1 if "section" in line else 0
-        v["SECTION"] = 1 if "SECTION" in line else 0
-        v["Section"] = 1 if "Section" in line else 0
-        v["article"] = 1 if "article" in line else 0
-        v["ARTICLE"] = 1 if "ARTICLE" in line else 0
-        v["Article"] = 1 if "Article" in line else 0
-        v["sw_section"] = 1 if line.strip().lower().startswith("section") else 0
-        v["sw_article"] = 1 if line.strip().lower().startswith("article") else 0
-        v["first_char_punct"] = (line.strip()[0] in string.punctuation) if len(line.strip()) > 0 else False
-        v["last_char_punct"] = (line.strip()[-1] in string.punctuation) if len(line.strip()) > 0 else False
-        v["first_char_number"] = (line.strip()[0] in string.digits) if len(line.strip()) > 0 else False
-        v["last_char_number"] = (line.strip()[-1] in string.digits) if len(line.strip()) > 0 else False
+        # Simple checks.  These should be calculated against the target line
+        # itself rather than the last line from the sliding window loop.
+        stripped_target = target_line.strip()
+        lowered_target = stripped_target.lower()
+        v["section"] = 1 if "section" in target_line else 0
+        v["SECTION"] = 1 if "SECTION" in target_line else 0
+        v["Section"] = 1 if "Section" in target_line else 0
+        v["article"] = 1 if "article" in target_line else 0
+        v["ARTICLE"] = 1 if "ARTICLE" in target_line else 0
+        v["Article"] = 1 if "Article" in target_line else 0
+        v["sw_section"] = 1 if lowered_target.startswith("section") else 0
+        v["sw_article"] = 1 if lowered_target.startswith("article") else 0
+        v["first_char_punct"] = (stripped_target[0] in string.punctuation) if stripped_target else False
+        v["last_char_punct"] = (stripped_target[-1] in string.punctuation) if stripped_target else False
+        v["first_char_number"] = (stripped_target[0] in string.digits) if stripped_target else False
+        v["last_char_number"] = (stripped_target[-1] in string.digits) if stripped_target else False
 
         # Build character vector
         for c in characters:
-            v["char_{0}".format(c)] = lines[line_id].count(c)
+            v["char_{0}".format(c)] = target_line.count(c)
 
         # Add doc if requested
-        if include_doc:
+        if include_doc is not None:
             v.update(include_doc)
 
         return v
