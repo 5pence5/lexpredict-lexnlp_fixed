@@ -11,7 +11,7 @@ import tempfile
 from unittest import TestCase
 import os
 
-import joblib
+from lexnlp.utils.unpickler import renamed_load
 
 from lexnlp import get_module_path
 from lexnlp.nlp.en.segments.sections import get_section_spans, SectionSegmenterModel
@@ -41,7 +41,7 @@ class TestTrainSectionSegmentizer(TestCase):
         copyfile(target_path, dump_model_path)
         for _ in range(iterations):
             self.train_and_dump()
-            SectionSegmenterModel.SECTION_SEGMENTER_MODEL = joblib.load(target_path)
+            SectionSegmenterModel.SECTION_SEGMENTER_MODEL = renamed_load(target_path)
 
             new_error = self.get_error()
             if new_error < error:

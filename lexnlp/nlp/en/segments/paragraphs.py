@@ -23,7 +23,7 @@ from re import Pattern, compile as re_compile
 from typing import Dict, Final, Generator, List, Set, Tuple, Union, Optional
 
 # third-party imports
-import joblib
+from lexnlp.utils.unpickler import renamed_load
 from pandas import DataFrame
 
 # LexNLP
@@ -36,7 +36,7 @@ from lexnlp.nlp.en.segments.utils import build_document_line_distribution
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Load segmenters
-PARAGRAPH_SEGMENTER_MODEL: Final = joblib.load(os.path.join(MODULE_PATH, "./paragraph_segmenter.pickle"))
+PARAGRAPH_SEGMENTER_MODEL: Final = renamed_load(os.path.join(MODULE_PATH, "./paragraph_segmenter.pickle"))
 
 # regular expression for newlines
 RE_NEW_LINE: Final[Pattern] = re_compile(r'(?P<line>[^\r\n]*)((\r\n)|(\n\r)|\n|\r)')

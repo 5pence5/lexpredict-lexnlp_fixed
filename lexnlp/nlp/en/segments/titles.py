@@ -17,7 +17,7 @@ import string
 from typing import Generator
 
 # Packages
-import joblib
+from lexnlp.utils.unpickler import renamed_load
 import numpy
 import pandas
 import requests
@@ -35,7 +35,7 @@ from lexnlp.utils.unicode.unicode_lookup import UNICODE_CHAR_TOP_CATEGORY_MAPPIN
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Load segmenters
-SECTION_SEGMENTER_MODEL = joblib.load(os.path.join(MODULE_PATH, "./title_locator.pickle"))
+SECTION_SEGMENTER_MODEL = renamed_load(os.path.join(MODULE_PATH, "./title_locator.pickle"))
 
 
 def build_title_features(lines, line_id, line_window_pre, line_window_post, characters=string.printable,

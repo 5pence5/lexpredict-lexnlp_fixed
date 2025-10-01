@@ -8,6 +8,9 @@ __email__ = "support@contraxsuite.com"
 
 import os
 
+# Apply compatibility patches before any downstream imports.
+from . import compat  # noqa: F401
+
 # Stanford NLP flag
 
 

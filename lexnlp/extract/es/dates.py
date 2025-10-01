@@ -39,7 +39,7 @@ DATE_MODEL_CHARS.extend(["-", "/", " ", "%", "#", "$"])
 class ESDateParser(DateParser):
     DEFAULT_DATEPARSER_SETTINGS = {'PREFER_DAY_OF_MONTH': 'first', 'STRICT_PARSING': False, 'DATE_ORDER': 'DMY'}
     SEQUENTIAL_DATES_RE = re.compile(
-        r'(?P<text>(?P<day>\d{{1,2}}) de (?P<month>{es_months})(?:, | y | de (?P<year>\d{{4}})))'.format(
+        r'(?P<text>(?P<day>\d{{1,2}})\s+de\s+(?P<month>{es_months})(?:,\s+|\s+y\s+|\s+de\s+(?P<year>\d{{4}})))'.format(
             es_months='|'.join(ES_MONTHS)), re.I | re.M)
     WEIRD_DATES_NORM = [
         (re.compile(r'(\d+º\s?de (?:{es_months})(?: de \d{{4}})?)'.format(
@@ -74,15 +74,22 @@ class ESDateParser(DateParser):
                         dateparser_dates_dict[a_date[0]] = a_date
             elif last_match_year and last_match_start is not None and last_match_start == match_end:
                 if capture_text not in dateparser_dates_dict:
+                    # Remove any existing entries that include trailing conjunctions for this date fragment.
+                    keys_to_replace = [
+                        key for key in list(dateparser_dates_dict.keys())
+                        if key.startswith(capture_text)
+                    ]
+                    for key in keys_to_replace:
+                        dateparser_dates_dict.pop(key, None)
                     a_date = self.get_dateparser_dates(capture_text, strict)
                     if a_date:
                         date_str, a_date = a_date[0]
                         a_date = a_date.replace(year=last_match_year)
-                        dateparser_dates_dict[date_str] = (capture_text, a_date)
+                        dateparser_dates_dict[capture_text] = (capture_text, a_date)
                 else:
                     a_date = dateparser_dates_dict[capture_text][1].replace(year=last_match_year)
                     if a_date:
-                        dateparser_dates_dict[capture_text] = (dateparser_dates_dict[capture_text][0], a_date)
+                        dateparser_dates_dict[capture_text] = (capture_text, a_date)
             last_match_start = match_start
 
         dates = list(dateparser_dates_dict.values())

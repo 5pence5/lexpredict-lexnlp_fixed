@@ -8,7 +8,7 @@ __maintainer__ = "LexPredict, LLC"
 __email__ = "support@contraxsuite.com"
 
 
-import joblib
+from lexnlp.utils.unpickler import renamed_load
 from typing import List
 from pandas import Series
 from gensim.models.doc2vec import Doc2Vec
@@ -33,7 +33,7 @@ class ContractTypeDetector:
             d2v_model_path (str):
         """
         with open(rf_model_path, "rb") as rf_model_file:
-            self.rf_model: RandomForestClassifier = joblib.load(rf_model_file)
+            self.rf_model: RandomForestClassifier = renamed_load(rf_model_file)
         self.d2v_model: Doc2Vec = Doc2Vec.load(d2v_model_path)
 
     @staticmethod
