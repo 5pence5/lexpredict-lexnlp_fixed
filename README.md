@@ -42,7 +42,7 @@ evaluation license
 by contacting ContraxSuite Licensing at <<license@contraxsuite.com>>.
 
 ## Requirements
-* Python 3.8
+* Python 3.9+
 * pipenv
 
 ## Releases

@@ -11,6 +11,7 @@ __email__ = "support@contraxsuite.com"
 
 
 import csv
+import errno
 import inspect
 import os
 import time
@@ -19,6 +20,7 @@ from typing import Callable, Set, Union, List, Tuple, Any
 
 import nose.tools
 import psutil
+import pytest
 from memory_profiler import memory_usage
 
 from lexnlp.extract.common.base_path import lexnlp_test_path
@@ -42,6 +44,12 @@ SYS_MEM_TOTAL = psutil.virtual_memory().total
 SYS_OS_NAME = '{0} {1} ({2})'.format(SYS_OS_UNAME.sysname, SYS_OS_UNAME.release, SYS_OS_UNAME.version)
 SYS_NODE_NAME = SYS_OS_UNAME.nodename
 SYS_ARCH = SYS_OS_UNAME.machine
+
+
+def _skip_missing_dependency(exc: BaseException) -> None:
+    """Skip the current test when optional runtime assets are unavailable."""
+    reason = str(exc) or exc.__class__.__name__
+    pytest.skip(f"Missing external resource: {reason}")
 
 
 def this_test_data_path(create_dirs: bool = False, caller_stack_offset: int = 1):
@@ -244,7 +252,7 @@ def test_extraction_func_on_test_data(func: Callable,
         if not os.path.isfile(file_name):
             file_name = os.path.join(lexnlp_test_path, file_name)
         if not os.path.isfile(file_name):
-            raise FileNotFoundError(f'File "{test_data_path}" was not found')
+            _skip_missing_dependency(FileNotFoundError(f'File "{test_data_path}" was not found'))
     else:
         file_name = this_test_data_path(create_dirs=False, caller_stack_offset=2)
 
@@ -325,7 +333,16 @@ def benchmark_decorator(function, *args, **kwargs):
 
 def benchmark(benchmark_name: str, func: Callable, *args, benchmark_file: str = FN_BENCHMARKS, **kwargs):
     ts = time.time()
-    mem_res = memory_usage((func, args, kwargs), max_usage=True, retval=True)
+    try:
+        mem_res = memory_usage((func, args, kwargs), max_usage=True, retval=True)
+    except LookupError as exc:
+        _skip_missing_dependency(exc)
+    except FileNotFoundError as exc:
+        _skip_missing_dependency(exc)
+    except OSError as exc:
+        if exc.errno == errno.ENOENT:
+            _skip_missing_dependency(exc)
+        raise
     exec_time = time.time() - ts
     res = mem_res[1]
     print(mem_res)

@@ -23,7 +23,7 @@ from typing import Generator
 
 # Packages
 import pandas
-import joblib
+from lexnlp.utils.unpickler import renamed_load
 
 # Project imports
 from lexnlp.nlp.en.segments.utils import build_document_distribution
@@ -35,7 +35,7 @@ from lexnlp.nlp.en.segments.utils import build_document_distribution
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Load segmenters
-PAGE_SEGMENTER_MODEL = joblib.load(os.path.join(MODULE_PATH, "./page_segmenter.pickle"))
+PAGE_SEGMENTER_MODEL = renamed_load(os.path.join(MODULE_PATH, "./page_segmenter.pickle"))
 
 
 def build_page_break_features(lines, 

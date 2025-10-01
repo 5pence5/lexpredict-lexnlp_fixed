@@ -75,7 +75,7 @@ terms or a non-GPL evaluation license by contacting ContraxSuite Licensing at
 Requirements
 ------------
 
--  Python 3.8
+-  Python 3.9+
 -  pipenv
 
 Releases

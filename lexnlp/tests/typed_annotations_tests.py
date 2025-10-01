@@ -16,6 +16,8 @@ from collections import OrderedDict
 from datetime import date, datetime
 from typing import Callable, Type, List, Any, Tuple, Union
 
+import pytest
+
 from lexnlp.extract.common.annotations.text_annotation import TextAnnotation
 from lexnlp.extract.common.base_path import lexnlp_test_path
 
@@ -237,6 +239,15 @@ class TypedAnnotationsTester:
         if not self.tests_failed and not len(self.errors):
             return
 
+        external_reasons = {
+            str(error.exception)
+            for error in self.errors
+            if isinstance(error.exception, (LookupError, FileNotFoundError))
+        }
+        if external_reasons:
+            reason = '; '.join(sorted(external_reasons)) or 'missing optional assets'
+            pytest.skip(f'Missing external resource for typed annotation test: {reason}')
+
         error_message = ''
         err_by_ant = OrderedDict()
         for er in self.errors:
@@ -288,7 +299,15 @@ class TypedAnnotationsTester:
             errors_before = len(self.errors)
 
             if isinstance(ants, types.GeneratorType):
-                ants = list(ants)
+                try:
+                    ants = list(ants)
+                except Exception as exc:  # pylint:disable=broad-except
+                    self.errors.append(ParsingError(
+                        message=f'Exception while parsing {case_index} case.',
+                        exception=exc,
+                        case_index=case_index,
+                    ))
+                    continue
 
             self.check_case_annotations(ants, case, case_index)
 

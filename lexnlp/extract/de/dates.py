@@ -10,7 +10,7 @@ import os
 from datetime import datetime
 from typing import Generator, List, Optional
 
-import joblib
+from lexnlp.utils.unpickler import renamed_load
 
 from lexnlp.extract.all_locales.languages import Locale
 from lexnlp.extract.common.annotations.date_annotation import DateAnnotation
@@ -23,7 +23,7 @@ from lexnlp.extract.de.de_date_parser import DeDateParser
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Load model
-MODEL_DATE = joblib.load(os.path.join(MODULE_PATH, "./date_model.pickle"))
+MODEL_DATE = renamed_load(os.path.join(MODULE_PATH, "./date_model.pickle"))
 
 
 parser = DeDateParser(DATE_MODEL_CHARS,

@@ -17,7 +17,14 @@ from typing import Dict, Optional
 import nltk.data
 
 
-CATALOG: Path = Path(nltk.data.find('')) / 'lexpredict-lexnlp'
+def _resolve_nltk_root() -> Path:
+    try:
+        return Path(nltk.data.find(''))
+    except (LookupError, IndexError):
+        return Path(nltk.data.path[0])
+
+
+CATALOG: Path = _resolve_nltk_root() / 'lexpredict-lexnlp'
 
 
 def _build_tag_dict() -> Dict[str, Path]:

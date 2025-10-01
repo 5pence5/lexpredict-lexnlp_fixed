@@ -101,6 +101,9 @@ def check_block_grouping(
     encountered. If the same block delimiter is encountered again, we
     immediately fail and return False.
     """
+    if not grouping:
+        grouping = [3]
+
     len_grouping: int = len(grouping)
     permitted_length: int = grouping[0]
     encountered_delimiters: Set[str] = set()
@@ -167,7 +170,14 @@ def infer_delimiters(
         locale_conventions = locale.localeconv()
         decimal_delimiter: str = locale_conventions['decimal_point']
         group_delimiter: str = locale_conventions['thousands_sep']
-        grouping: List[int] = locale_conventions['grouping']
+        grouping: List[int] = [value for value in locale_conventions['grouping'] if value > 0]
+        if not group_delimiter and '.' in text and ',' not in text:
+            segments = text.split('.')
+            if all(segment.isdigit() for segment in segments) and len(segments[-1]) == 3:
+                group_delimiter = '.'
+                decimal_delimiter = None
+        if not grouping:
+            grouping = [3]
 
     delimiters, blocks = get_delimited_blocks(text)
     len_delimiters: int = len(delimiters)
@@ -219,7 +229,8 @@ def infer_delimiters(
                 'group_delimiter': block.delimiter
             }
 
-        if block.length == grouping[0]:
+        grouping_first = grouping[0] if grouping else 3
+        if block.length == grouping_first:
             # `text` is an integer
             return {
                 'decimal_delimiter': decimal_delimiter,
