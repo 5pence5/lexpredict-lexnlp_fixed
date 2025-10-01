@@ -19,6 +19,13 @@ try:  # pragma: no cover - optional dependency during some builds
 except Exception:  # pragma: no cover - bail out if scikit-learn unavailable
     _tree = None
 
+_EXPECTS_MISSING_FIELD = False
+if _tree is not None:
+    _node_dtype = getattr(_tree, "NODE_DTYPE", None)
+    _node_dtype_names = getattr(_node_dtype, "names", None)
+    if _node_dtype_names is not None:
+        _EXPECTS_MISSING_FIELD = "missing_go_to_left" in _node_dtype_names
+
 try:  # pragma: no cover
     from joblib import numpy_pickle
 except Exception:  # pragma: no cover
@@ -28,6 +35,8 @@ except Exception:  # pragma: no cover
 def _augment_nodes(nodes: np.ndarray) -> np.ndarray:
     """Return a node array with a ``missing_go_to_left`` column."""
 
+    if not _EXPECTS_MISSING_FIELD:
+        return nodes
     if not isinstance(nodes, np.ndarray) or nodes.dtype.names is None:
         return nodes
     if "missing_go_to_left" in nodes.dtype.names:
