@@ -18,7 +18,8 @@ import calendar
 import datetime
 import os
 import random
-from typing import Any, Dict, Generator, List, Optional, Set, Tuple
+from dataclasses import dataclass, field
+from typing import Any, Dict, Generator, Iterable, List, Optional, Sequence, Tuple
 
 # Third-party packages
 import regex as re
@@ -30,6 +31,7 @@ from lexnlp.extract.common.date_parsing.datefinder import DateFinder
 from lexnlp.extract.common.dates import DateParser
 from lexnlp.extract.common.dates_classifier_model import build_date_model, get_date_features
 from lexnlp.extract.en.date_model import MODEL_DATE, MODULE_PATH, DATE_MODEL_CHARS
+from lexnlp.extract.en.date_validation import check_date_parts_are_in_date
 
 
 # Distance in characters to use to merge two date strings
@@ -68,9 +70,275 @@ MONTH_BY_NAME = get_month_by_name()
 MONTH_FULLS = {v.lower(): k for k, v in enumerate(calendar.month_name)}
 
 
+@dataclass
+class CandidateDate:
+    """Container for a potential date extracted by :class:`DateFinder`."""
+
+    raw_text: str
+    span: Tuple[int, int]
+    props: Dict[str, Any]
+    index: int
+    date_finder: DateFinder
+    locale: Locale
+    normalized_text: str = field(init=False)
+
+    def __post_init__(self) -> None:
+        self.normalized_text = self.raw_text
+
+
+@dataclass
+class CandidateOutcome:
+    """Result of evaluating a :class:`CandidateDate`."""
+
+    candidate: CandidateDate
+    accepted: bool
+    date: Optional[datetime.date] = None
+    reason: Optional[str] = None
+
+
 def get_raw_date_list(text, strict=False, base_date=None, return_source=False, locale=None) -> List:
     return list(get_raw_dates(
         text, strict=strict, base_date=base_date, return_source=return_source, locale=locale))
+
+
+def _copy_date_props(date_props: Dict[str, Any]) -> Dict[str, Any]:
+    copied: Dict[str, Any] = {}
+    for key, value in date_props.items():
+        if isinstance(value, list):
+            copied[key] = value.copy()
+        elif isinstance(value, tuple):
+            copied[key] = list(value)
+        else:
+            copied[key] = value
+    return copied
+
+
+def _normalize_day_of(candidate: CandidateDate,
+                      previous_candidate: Optional[CandidateDate],
+                      previous_outcome: Optional[CandidateOutcome]) -> CandidateDate:
+    props = candidate.props
+    if not props:
+        return candidate
+
+    extra_tokens: List[str] = props.get("extra_tokens", [])
+    if not extra_tokens:
+        return candidate
+
+    has_of_token = any(token.lower() == "of" for token in extra_tokens)
+    if not has_of_token or previous_candidate is None or previous_outcome is None:
+        return candidate
+
+    if previous_outcome.accepted:
+        return candidate
+
+    previous_modifiers: List[str] = previous_candidate.props.get("digits_modifier", [])
+    if len(previous_modifiers) != 1:
+        return candidate
+
+    modifier_token = previous_modifiers[-1]
+    normalized_modifier = (modifier_token
+                           .replace("st", "")
+                           .replace("nd", "")
+                           .replace("rd", "")
+                           .replace("th", ""))
+    props["digits_modifier"] = previous_modifiers + props.get("digits_modifier", [])
+    previous_candidate.props["digits_modifier"] = previous_modifiers[:-1]
+    candidate.normalized_text = f"{normalized_modifier}{candidate.normalized_text}"
+    return candidate
+
+
+def _reject_impossible_formats(candidate: CandidateDate) -> Optional[str]:
+    props = candidate.props
+    text = candidate.normalized_text
+
+    num_month = len(props.get("months", []))
+    num_digits_modifier = len(props.get("digits_modifier", []))
+    num_digits = len(props.get("digits", []))
+    num_days = len(props.get("days", []))
+    delimiters: Sequence[str] = props.get("delimiters", [])
+    num_slash = delimiters.count("/")
+    num_point = delimiters.count(".")
+    num_hyphen = delimiters.count("-")
+
+    if num_month > 1:
+        return "multiple_month_tokens"
+
+    extra_tokens: List[str] = props.get("extra_tokens", [])
+    if (num_month == 1 and extra_tokens
+            and (props["months"][0] + extra_tokens[-1]) in text):
+        return "month_followed_by_word"
+
+    if num_digits_modifier > 0 and num_digits == 0:
+        return "modifier_without_digits"
+
+    if num_days > 0 and num_digits == 0:
+        return "day_without_digits"
+
+    if num_month == 0 and num_digits_modifier == 0 and num_digits <= 1:
+        return "insufficient_components"
+
+    if re.match(r"\d{1,2}\s+\d{1,2}", text):
+        return "ambiguous_double_numbers"
+
+    if num_point and not num_month and not re.match(r"\d{2}\.\d{2}\.\d{2,4}", text):
+        return "decimal_without_month"
+
+    if re.search(r"\d{2,4}\.\s*[A-Za-z]", text):
+        return "number_dot_word"
+
+    if (num_slash == 1 or num_hyphen == 1) and num_digits > 2:
+        return "fraction_like_number"
+
+    found_triple = any(len(digit) == 3 for digit in props.get("digits", []))
+    found_double_zero = any(digit.startswith("00") for digit in props.get("digits", []))
+    if found_triple or found_double_zero:
+        return "invalid_digit_length"
+
+    month_string = "".join(props.get("months", [])).lower()
+    if num_digits == 0 and num_days == 0 and month_string == "may":
+        return "standalone_may"
+
+    if (num_digits > 0 and (num_point + num_slash + num_hyphen) > 0 and month_string == "may"):
+        return "punctuated_may"
+
+    return None
+
+
+def _normalize_tokens(candidate: CandidateDate) -> CandidateDate:
+    props = candidate.props
+    text = candidate.normalized_text
+    extra_tokens = sorted(props.get("extra_tokens", []), key=len, reverse=True)
+    for token in extra_tokens:
+        if token.lower() in ["to", "t"]:
+            continue
+        text = text.replace(token, "")
+    candidate.normalized_text = text.strip()
+    props["extra_tokens"] = []
+    return candidate
+
+
+def _reject_post_normalization(candidate: CandidateDate) -> Optional[str]:
+    text = candidate.normalized_text
+    if len(text) > DATE_MAX_LENGTH:
+        return "exceeds_max_length"
+
+    match_delims = set("".join(candidate.props.get("delimiters", [])))
+    bad_delims = {",", " ", "\n", "\t"}
+    len_diff_set = len(match_delims - bad_delims)
+    num_month = len(candidate.props.get("months", []))
+    if len_diff_set == 0 and num_month == 0:
+        return "digits_without_month"
+
+    return None
+
+
+def _parse_candidate(candidate: CandidateDate) -> CandidateOutcome:
+    date_props = candidate.props
+    date_finder = candidate.date_finder
+    base_string = candidate.normalized_text
+
+    try:
+        date_string_tokens = base_string.split()
+        date: Optional[datetime.datetime] = None
+        for cutter in range(len(date_string_tokens)):
+            for direction in (0, 1):
+                working_string = base_string
+                if cutter > 0:
+                    if direction:
+                        working_tokens = date_string_tokens[cutter:]
+                    else:
+                        working_tokens = date_string_tokens[:-cutter]
+                    working_string = " ".join(working_tokens)
+                try:
+                    date = date_finder.parse_date_string(working_string, date_props, locale=candidate.locale)
+                except Exception:  # pylint: disable=broad-except
+                    date = None
+                if date:
+                    break
+            if date:
+                break
+    except TypeError:
+        return CandidateOutcome(candidate, False, reason="type_error")
+
+    if not date:
+        return CandidateOutcome(candidate, False, reason="parse_failure")
+
+    if not check_date_parts_are_in_date(date, date_props, month_lookup=MONTH_BY_NAME):
+        return CandidateOutcome(candidate, False, reason="date_parts_mismatch")
+
+    if hasattr(date, "tzinfo"):
+        try:
+            _ = date.isoformat()
+        except ValueError:
+            return CandidateOutcome(candidate, False, reason="invalid_timezone")
+
+    result_date: datetime.date
+    if isinstance(date, datetime.datetime) and date.hour == 0 and date.minute == 0:
+        result_date = date.date()
+    else:
+        result_date = date
+
+    return CandidateOutcome(candidate, True, date=result_date)
+
+
+def _iter_candidate_evaluations(text: str,
+                                date_finder: DateFinder,
+                                locale: Locale,
+                                strict: bool) -> Iterable[CandidateOutcome]:
+    possible_dates = list(date_finder.extract_date_strings(text, strict=strict))
+
+    previous_candidate: Optional[CandidateDate] = None
+    previous_outcome: Optional[CandidateOutcome] = None
+
+    for index, possible_date in enumerate(possible_dates):
+        candidate = CandidateDate(
+            raw_text=possible_date[0],
+            span=possible_date[1],
+            props=_copy_date_props(possible_date[2]),
+            index=index,
+            date_finder=date_finder,
+            locale=locale,
+        )
+
+        candidate = _normalize_day_of(candidate, previous_candidate, previous_outcome)
+
+        rejection_reason = _reject_impossible_formats(candidate)
+        if rejection_reason is not None:
+            outcome = CandidateOutcome(candidate, False, reason=rejection_reason)
+        else:
+            candidate = _normalize_tokens(candidate)
+            post_rejection = _reject_post_normalization(candidate)
+            if post_rejection is not None:
+                outcome = CandidateOutcome(candidate, False, reason=post_rejection)
+            else:
+                outcome = _parse_candidate(candidate)
+
+        yield outcome
+        previous_candidate = candidate
+        previous_outcome = outcome
+
+
+def _candidate_outcomes(text: str,
+                        strict: bool,
+                        base_date: Optional[datetime.datetime],
+                        locale: Optional[Locale]) -> Iterable[CandidateOutcome]:
+    if isinstance(locale, str):
+        locale_obj = Locale(locale)
+    elif locale is None:
+        locale_obj = Locale('')
+    else:
+        locale_obj = locale
+
+    if not base_date:
+        base_date = datetime.datetime.now().replace(
+            day=1, month=1, hour=0, minute=0, second=0, microsecond=0)
+
+    date_finder = DateFinder(base_date=base_date)
+    for extra_token in date_finder.EXTRA_TOKENS_PATTERN.split('|'):
+        if extra_token != 't':
+            date_finder.REPLACEMENTS[extra_token] = ' '
+
+    return _iter_candidate_evaluations(text, date_finder, locale_obj, strict)
 
 
 def get_raw_dates(text, strict=False, base_date=None,
@@ -84,264 +352,13 @@ def get_raw_dates(text, strict=False, base_date=None,
     :param locale: locale object
     :return:
     """
-    if isinstance(locale, str):
-        locale = Locale(locale)
-    elif locale is None:
-        locale = Locale('')
-    # Setup base date
-    if not base_date:
-        base_date = datetime.datetime.now().replace(
-            day=1, month=1, hour=0, minute=0, second=0, microsecond=0)
-
-    # Find potential dates
-    date_finder = DateFinder(base_date=base_date)
-
-    for extra_token in date_finder.EXTRA_TOKENS_PATTERN.split('|'):
-        if extra_token != 't':
-            date_finder.REPLACEMENTS[extra_token] = ' '
-
-    # Iterate through possible matches
-    possible_dates = list(date_finder.extract_date_strings(text, strict=strict))
-    possible_matched = []
-
-    for i, possible_date in enumerate(possible_dates):
-        # Get
-        date_string = possible_date[0]
-        index = possible_date[1]
-        date_props = possible_date[2]
-
-        # Cleanup "day of" strings
-        if "of" in date_props["extra_tokens"] or "OF" in date_props["extra_tokens"]:
-            num_dig_mod = len(possible_dates[i - 1][2]["digits_modifier"])
-            if i > 0 and not possible_matched[i - 1] and num_dig_mod == 1:
-                date_props["digits_modifier"].extend(possible_dates[i - 1][2]["digits_modifier"])
-                date_string = possible_dates[i - 1][2]["digits_modifier"].pop() \
-                                  .replace("st", "") \
-                                  .replace("nd", "") \
-                                  .replace("rd", "") \
-                                  .replace("th", "") + date_string
-
-        # Skip only digits modifiers
-        num_dig_mod = len(date_props["digits_modifier"])
-        num_dig = len(date_props["digits"])
-        num_days = len(date_props["days"])
-        num_month = len(date_props["months"])
-        num_slash = date_props["delimiters"].count("/")
-        num_point = date_props["delimiters"].count(".")
-        num_hyphen = date_props["delimiters"].count("-")
-
-        # Remove double months
-        if num_month > 1:
-            possible_matched.append(False)
+    for outcome in _candidate_outcomes(text, strict, base_date, locale):
+        if not outcome.accepted or outcome.date is None:
             continue
-
-        # Remove wrong months like Dec*ided or Mar*tin
-        if num_month == 1 and date_props['extra_tokens'] \
-                and (date_props['months'][0] + date_props['extra_tokens'][-1]) in date_string:
-            possible_matched.append(False)
-            continue
-
-        # Check strange strings
-        if num_dig_mod > 0 and num_dig == 0:
-            possible_matched.append(False)
-            continue
-
-        # Skip DOW only
-        if num_days > 0 and num_dig == 0:
-            possible_matched.append(False)
-            continue
-
-        # Skip DOM only
-        if num_month == 0 and num_dig_mod == 0 and num_dig <= 1:
-            possible_matched.append(False)
-            continue
-
-        # Skip odd date like "1 10"
-        if re.match(r'\d{1,2}\s+\d{1,2}', date_string):
-            possible_matched.append(False)
-            continue
-
-        # Skip floats
-        if num_point and not num_month and not re.match(r'\d{2}\.\d{2}\.\d{2,4}', date_string):
-            possible_matched.append(False)
-            continue
-
-        # Skip odd months from string like "Nil 62. Marquee"
-        if re.search(r'\d{2,4}\.\s*[A-Za-z]', date_string):
-            possible_matched.append(False)
-            continue
-
-        # Skip fractions
-        if (num_slash == 1 or num_hyphen == 1) and num_dig > 2:
-            possible_matched.append(False)
-            continue
-
-        # Skip three-digit blocks and double zero years
-        found_triple = False
-        found_dz = False
-        for digit in date_props["digits"]:
-            if len(digit) == 3:
-                found_triple = True
-            if digit.startswith("00"):
-                found_dz = True
-        if found_triple or found_dz:
-            possible_matched.append(False)
-            continue
-
-        # Skip "may" alone
-        if num_dig == 0 and num_days == 0 and "".join(date_props["months"]).lower() == "may":
-            possible_matched.append(False)
-            continue
-
-        # Skip cases like "13.2 may" or "12.12may"
-        if (
-                num_dig > 0
-                and (num_point + num_slash + num_hyphen) > 0
-                and "".join(date_props["months"]).lower() == "may"
-        ):
-            possible_matched.append(False)
-            continue
-
-        # Cleanup
-        for token in sorted(date_props["extra_tokens"], key=len, reverse=True):
-            if token.lower() in ["to", "t"]:
-                continue
-            date_string = date_string.replace(token, "")
-        date_string = date_string.strip()
-        date_props["extra_tokens"] = []
-
-        # Skip strings too long
-        if len(date_string) > DATE_MAX_LENGTH:
-            possible_matched.append(False)
-            continue
-
-        # Skip numbers only
-        match_delims = set("".join(date_props["delimiters"]))
-        bad_delims = {",", " ", "\n", "\t"}
-        len_diff_set = len(match_delims - bad_delims)
-        if len_diff_set == 0 and num_month == 0:
-            possible_matched.append(False)
-            continue
-
-        # Parse and skip nones
-        date = None
-        try:
-            date_string_tokens = date_string.split()
-            for cutter in range(len(date_string_tokens)):
-                for direction in (0, 1):
-                    if cutter > 0:
-                        if direction:
-                            _date_string_tokens = date_string_tokens[cutter:]
-                        else:
-                            _date_string_tokens = date_string_tokens[:-cutter]
-                        date_string = ' '.join(_date_string_tokens)
-                    try:
-                        date = date_finder.parse_date_string(date_string, date_props, locale=locale)
-                    # pylint: disable=broad-except
-                    except:
-                        date = None
-                    if date:
-                        break
-                else:
-                    continue  # executed if the loop ended normally (no break)
-                break  # executed if 'continue' was skipped (break)
-        except TypeError:
-            possible_matched.append(False)
-            continue
-
-        if date and not check_date_parts_are_in_date(date, date_props):
-            date = None
-
-        if not date:
-            possible_matched.append(False)
-            continue
-        # for case when datetime.datetime(2001, 1, 22, 20, 1, tzinfo=tzoffset(None, -104400))
-        if hasattr(date, 'tzinfo'):
-            try:
-                _ = date.isoformat()
-            except ValueError:
-                possible_matched.append(False)
-                continue
-        possible_matched.append(True)
-
-        if isinstance(date, datetime.datetime) and date.hour == 0 and date.minute == 0:
-            date = date.date()
-        # Append
         if return_source:
-            yield (date, index)
+            yield outcome.date, outcome.candidate.span
         else:
-            yield date
-
-
-def check_date_parts_are_in_date(
-        date: datetime.datetime,
-        date_props: Dict[str, List[Any]]
-) -> bool:
-    """
-    Checks that when we transformed "possible date" into date, we found
-    place for each "token" from the initial phrase
-    :param date:
-    :param date_string: "13.2 may"
-    :param date_props: {'time': [], 'hours': [] ... 'digits': ['13', '2'] ...}
-    :return: True if date is OK
-    """
-
-    def _ordinal_to_cardinal(s: str) -> Optional[int]:
-        n: str = ''
-        for char in s:
-            if char.isdigit():
-                n: str = f'{n}{char}'
-        return int(n) if n else None
-
-    units_of_time: Tuple[str, ...] = ('year', 'month', 'day', 'hour', 'minute')
-    date_values: Dict[str, int] = {
-        unit: getattr(date, unit)
-        for unit in units_of_time
-    }
-
-    date_prop_digits: List[int] = [int(d) for d in date_props['digits']]
-    date_prop_months: List[int] = [
-        MONTH_BY_NAME.get(month.lower())
-        for month in date_props['months']
-    ]
-    date_prop_days: List[int] = [
-        day for day in
-        (_ordinal_to_cardinal(n) for n in date_props['digits_modifier'])
-        if day
-    ]
-
-    # skip cases like "Section 7.7.10 may"
-    if date_prop_months:
-        month = date_values.get('month')
-        if month:
-            if month not in date_prop_months:
-                return False
-
-    combined: List[int] = [*date_prop_digits, *date_prop_months, *date_prop_days]
-    difference: Set[int] = set(combined).difference(date_values.values())
-
-    removeable: List[int] = []
-    reassembled_date: Dict[str, int] = {}
-    for k, v in date_values.items():
-        if k == 'year':
-            short_year = (v - 100 * (v // 100)) if v > 1000 else v
-            if short_year in combined:
-                reassembled_date[k] = v
-                removeable.append(short_year)
-                continue
-        if v in combined:
-            reassembled_date[k] = v
-            removeable.append(v)
-
-    diff_digits: List[int] = [digit for digit in difference if digit not in removeable]
-    diff_units: Set[str] = date_values.keys() - reassembled_date.keys()
-
-    if any(k for k in diff_units if k in units_of_time[:3]):
-        if diff_digits:
-            return False
-    return True
-
-
+            yield outcome.date
 def get_dates_list(text, **kwargs) -> List:
     return list(get_dates(text, **kwargs))
 
@@ -388,21 +405,23 @@ def get_date_annotations(text: str,
 
     # Get raw dates
     strict = strict if strict is not None else False
-    raw_date_results = get_raw_dates(
-        text, strict=strict, base_date=base_date, return_source=True, locale=Locale(locale))
+    outcomes = _candidate_outcomes(text, strict, base_date, locale)
 
-    for raw_date in raw_date_results:
-        feature_row = get_date_features(text, raw_date[1][0], raw_date[1][1], characters=DATE_MODEL_CHARS)
+    for outcome in outcomes:
+        if not outcome.accepted or outcome.date is None:
+            continue
+
+        start, end = outcome.candidate.span
+        feature_row = get_date_features(text, start, end, characters=DATE_MODEL_CHARS)
         feature_list = len(feature_row) * [0.0]
         for i, col in enumerate(MODEL_DATE.columns):
             feature_list[i] = feature_row[col]
         date_score = MODEL_DATE.predict_proba([feature_list])
         if date_score[0, 1] >= threshold:
-            date, coordinates = raw_date
             annotation = DateAnnotation(
-                coords=coordinates,
-                text=text[slice(*coordinates)],
-                date=date,
+                coords=(start, end),
+                text=text[slice(start, end)],
+                date=outcome.date,
                 score=date_score[0, 1]
             )
             yield annotation
