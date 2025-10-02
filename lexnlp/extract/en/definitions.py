@@ -10,16 +10,23 @@ from typing import Generator, List, Tuple
 
 from lexnlp.extract.common.annotation_locator_type import AnnotationLocatorType
 from lexnlp.extract.common.annotations.definition_annotation import DefinitionAnnotation
-from lexnlp.extract.en.definition_parsing_methods import DefinitionCaught, get_definition_list_in_sentence, \
-    filter_definitions_for_self_repeating
+from lexnlp.extract.en.definition_parsing_methods import (
+    DefinitionCaught,
+    EnglishDefinitionExtractor,
+    filter_definitions_for_self_repeating,
+)
 from lexnlp.extract.ml.en.definitions.layered_definition_detector import LayeredDefinitionDetector
 from lexnlp.nlp.en.segments.sentences import get_sentence_span
 
 
-def get_definitions_in_sentence(sentence: str,
-                                return_sources=False,
-                                decode_unicode=True) -> Generator:
-    definitions = get_definition_list_in_sentence((0, len(sentence), sentence), decode_unicode)
+definition_extractor = EnglishDefinitionExtractor()
+
+
+def get_definitions_in_sentence(
+        sentence: str,
+        return_sources=False,
+        decode_unicode=True) -> Generator:
+    definitions = definition_extractor.get_definition_list_in_sentence((0, len(sentence), sentence), decode_unicode)
     for df in definitions:
         if return_sources:
             yield df.name, df.text
@@ -35,7 +42,7 @@ def get_definition_objects_list(text, decode_unicode=True) -> List[DefinitionCau
     """
     definitions = []
     for sentence in get_sentence_span(text):  # type: Tuple[int, int, str]
-        definitions += get_definition_list_in_sentence(sentence, decode_unicode)
+        definitions += definition_extractor.get_definition_list_in_sentence(sentence, decode_unicode)
     definitions = filter_definitions_for_self_repeating(definitions)
     return definitions
 
