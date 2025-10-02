@@ -25,8 +25,12 @@ ROUTINE_BY_LOCALE = {
 def get_amount_annotations(
     locale: str,
     text: str,
-    extended_sources: bool = True,
+    extended_sources: bool = False,
     float_digits: int = 4,
 ) -> Generator[AmountAnnotation, None, None]:
     routine = ROUTINE_BY_LOCALE.get(Locale(locale).language, ROUTINE_BY_LOCALE[DEFAULT_LANGUAGE.code])
-    yield from routine(text, extended_sources, float_digits)
+    yield from routine(
+        text=text,
+        extended_sources=extended_sources,
+        float_digits=float_digits,
+    )

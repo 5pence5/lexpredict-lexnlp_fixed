@@ -39,7 +39,7 @@ DATE_MODEL_CHARS.extend(["-", "/", " ", "%", "#", "$"])
 class ESDateParser(DateParser):
     DEFAULT_DATEPARSER_SETTINGS = {'PREFER_DAY_OF_MONTH': 'first', 'STRICT_PARSING': False, 'DATE_ORDER': 'DMY'}
     SEQUENTIAL_DATES_RE = re.compile(
-        r'(?P<text>(?P<day>\d{{1,2}})\s+de\s+(?P<month>{es_months})(?:,\s+|\s+y\s+|\s+de\s+(?P<year>\d{{4}})))'.format(
+        r'(?P<text>(?P<day>\d{{1,2}})\s+de\s+(?P<month>{es_months})(?:,\s+|\s+y(?:\s+el)?\s+|\s+de(?:l)?\s+(?P<year>\d{{4}})))'.format(
             es_months='|'.join(ES_MONTHS)), re.I | re.M)
     WEIRD_DATES_NORM = [
         (re.compile(r'(\d+º\s?de (?:{es_months})(?: de \d{{4}})?)'.format(
@@ -63,7 +63,8 @@ class ESDateParser(DateParser):
         dates_rev = reversed(list(self.SEQUENTIAL_DATES_RE.finditer(self.text)))
         for match in dates_rev:
             capture = match.capturesdict()
-            capture_text = ''.join(capture['text']).strip(',y ')
+            capture_text = ''.join(capture['text'])
+            capture_text = re.sub(r'(?:,\s*|y(?:\s+el)?\s+)+$', '', capture_text, flags=re.I).strip()
             match_start, match_end = match.span()
             if capture['year']:
                 last_match_year = int(''.join(capture['year']))
