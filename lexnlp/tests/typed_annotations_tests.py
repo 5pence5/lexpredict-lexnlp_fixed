@@ -14,12 +14,50 @@ import regex as re
 from ast import literal_eval as make_tuple
 from collections import OrderedDict
 from datetime import date, datetime
-from typing import Callable, Type, List, Any, Tuple, Union
+from typing import Any, Callable, Iterable, List, Optional, Set, Tuple, Type, Union
 
 import pytest
 
 from lexnlp.extract.common.annotations.text_annotation import TextAnnotation
 from lexnlp.extract.common.base_path import lexnlp_test_path
+
+
+def _iter_exception_chain(exc: BaseException) -> Iterable[BaseException]:
+    seen: Set[int] = set()
+    stack = [exc]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        marker = id(current)
+        if marker in seen:
+            continue
+        seen.add(marker)
+        yield current
+        cause = getattr(current, "__cause__", None)
+        context = getattr(current, "__context__", None)
+        if cause is not None:
+            stack.append(cause)
+        if context is not None:
+            stack.append(context)
+        nested = getattr(current, "exceptions", None)
+        if nested:
+            stack.extend(nested)
+
+
+def _unwrap_optional_exception(exc: BaseException) -> BaseException:
+    for candidate in _iter_exception_chain(exc):
+        if isinstance(candidate, (LookupError, FileNotFoundError)):
+            return candidate
+    return exc
+
+
+def _optional_skip_reason(exc: BaseException) -> Optional[str]:
+    relevant = _unwrap_optional_exception(exc)
+    if isinstance(relevant, (LookupError, FileNotFoundError)):
+        message = str(relevant).strip()
+        return message or relevant.__class__.__name__
+    return None
 
 
 class TypedAntTestCase:
@@ -230,6 +268,11 @@ class TypedAnnotationsTester:
                               parsing_method: Callable,
                               file_name: str,
                               entity_type: Type):
+        self.errors = []
+        self.tests_passed = 0
+        self.tests_failed = 0
+        self.test_cases = []
+        self.test_case = TypedAntTestCase()
         print(f'Testing {entity_type}, file: "{file_name}"\n')
         self.test_parser(parsing_method, file_name, entity_type)
         if self.tests_failed:
@@ -240,9 +283,10 @@ class TypedAnnotationsTester:
             return
 
         external_reasons = {
-            str(error.exception)
+            reason
             for error in self.errors
-            if isinstance(error.exception, (LookupError, FileNotFoundError))
+            for reason in (_optional_skip_reason(error.exception),)
+            if reason
         }
         if external_reasons:
             reason = '; '.join(sorted(external_reasons)) or 'missing optional assets'
@@ -273,16 +317,23 @@ class TypedAnnotationsTester:
                     entity_type: Type):
 
         self.file_path = file_name
+        if not os.path.isabs(self.file_path):
+            candidate = os.path.join(lexnlp_test_path, self.file_path)
+            if os.path.isfile(candidate):
+                self.file_path = candidate
         if not os.path.isfile(self.file_path):
-            self.file_path = os.path.join(lexnlp_test_path, self.file_path)
+            self.file_path = os.path.join(lexnlp_test_path, file_name)
         if not os.path.isfile(self.file_path):
             raise FileNotFoundError(f'File "{file_name}" was not found')
 
+        self.file_path = os.path.abspath(self.file_path)
         self.parsing_method = parsing_method
         self.entity_type = entity_type
         self.process_file()
 
     def process_file(self):
+        self.test_cases = []
+        self.test_case = TypedAntTestCase()
         self.read_cases()
         self.process_cases()
 
@@ -294,7 +345,7 @@ class TypedAnnotationsTester:
             except Exception as e:  # pylint:disable=broad-except
                 self.errors.append(ParsingError(
                     message=f'Exception while parsing {case_index} case.',
-                    exception=e))
+                    exception=_unwrap_optional_exception(e)))
                 continue
             errors_before = len(self.errors)
 
@@ -304,7 +355,7 @@ class TypedAnnotationsTester:
                 except Exception as exc:  # pylint:disable=broad-except
                     self.errors.append(ParsingError(
                         message=f'Exception while parsing {case_index} case.',
-                        exception=exc,
+                        exception=_unwrap_optional_exception(exc),
                         case_index=case_index,
                     ))
                     continue
@@ -352,7 +403,7 @@ class TypedAnnotationsTester:
             self.errors.append(ParsingError(
                 message=f'Error getting annotation value {check.path_string}',
                 case_index=case_index,
-                exception=e,
+                exception=_unwrap_optional_exception(e),
                 check_index=check_index))
             return
 

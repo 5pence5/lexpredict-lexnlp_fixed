@@ -9,7 +9,7 @@ __email__ = "support@contraxsuite.com"
 
 
 import locale
-from typing import Sequence, Union
+from typing import List, Sequence, Union
 
 
 class LocaleContextManager:
@@ -26,14 +26,40 @@ class LocaleContextManager:
         `category` may be given as one of the LC_* values.
         """
         self._original_locale: Sequence = locale.getlocale()
+        self._applied_locale: Union[str, None] = None
         self.category: int = category
         self.locale: str = _locale
 
+    def _candidate_locales(self) -> List[str]:
+        candidates: List[str] = []
+        if isinstance(self.locale, str) and self.locale:
+            normalized = locale.normalize(self.locale)
+            for option in (
+                self.locale,
+                normalized,
+                f"{self.locale}.UTF-8" if '.' not in self.locale else None,
+                f"{self.locale}.utf8" if '.' not in self.locale else None,
+            ):
+                if option and option not in candidates:
+                    candidates.append(option)
+        elif isinstance(self.locale, Sequence):
+            normalized = locale.normalize('_'.join(filter(None, self.locale)))
+            if normalized:
+                candidates.append(normalized)
+        for fallback in ("C.UTF-8", "C"):
+            if fallback not in candidates:
+                candidates.append(fallback)
+        return candidates
+
     def __enter__(self) -> Union[str, str]:
-        try:
-            return locale.setlocale(self.category, self.locale)
-        except locale.Error:
-            ...
+        for candidate in self._candidate_locales():
+            try:
+                self._applied_locale = locale.setlocale(self.category, candidate)
+                return self._applied_locale
+            except locale.Error:
+                continue
+        self._applied_locale = locale.setlocale(self.category)
+        return self._applied_locale
 
     def __exit__(self, type, value, traceback) -> None:
         locale.setlocale(self.category, self._original_locale)

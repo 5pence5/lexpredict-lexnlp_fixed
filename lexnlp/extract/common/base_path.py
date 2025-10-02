@@ -11,4 +11,8 @@ import os
 
 lexnlp_base_path = os.path.abspath(os.path.dirname(__file__) + '/../../../')
 
-lexnlp_test_path = os.path.join(lexnlp_base_path, 'test_data/')
+_test_path_override = os.environ.get('LEXNLP_TEST_DATA_PATH') or os.environ.get('LEXNLP_TEST_DATA')
+if _test_path_override:
+    lexnlp_test_path = os.path.abspath(_test_path_override)
+else:
+    lexnlp_test_path = os.path.join(lexnlp_base_path, 'test_data')
