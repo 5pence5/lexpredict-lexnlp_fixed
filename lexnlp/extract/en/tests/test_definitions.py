@@ -25,7 +25,12 @@ from unittest import TestCase
 
 from lexnlp.extract.common.annotation_locator_type import AnnotationLocatorType
 from lexnlp.extract.ml.environment import ENV_EN_DATA_DIRECTORY
-from lexnlp.extract.en.definition_parsing_methods import trim_defined_term, NOUN_PTN_RE, get_definition_list_in_sentence
+from lexnlp.extract.en.definition_parsing_methods import (
+    EnglishDefinitionExtractor,
+    get_definition_list_in_sentence,
+)
+from lexnlp.extract.en.definition_term_utils import trim_defined_term
+from lexnlp.extract.en.definition_patterns import DEFAULT_PATTERN_REGISTRY, DefinitionPatternRegistry
 from lexnlp.extract.en.definitions import \
     get_definitions_explicit, get_definitions_in_sentence, get_definition_annotations, parser_ml_classifier, \
     get_definitions
@@ -49,6 +54,20 @@ class TestEnglishDefinitions(TestCase):
         term = 'this "Deed of Trust"'
         term_cleared, _, _, _ = trim_defined_term(term, 5, 31)
         self.assertEqual('Deed of Trust', term_cleared)
+
+    def test_pattern_registry_groups_have_metadata(self):
+        quoted_patterns = DEFAULT_PATTERN_REGISTRY.group('quoted_definition')
+        self.assertGreater(len(quoted_patterns), 0)
+        for pattern in quoted_patterns:
+            self.assertTrue(pattern.description)
+
+    def test_custom_extractor_matches_default(self):
+        sentence = '(the "Agreement") shall mean this Agreement.'
+        coords = (0, len(sentence), sentence)
+        extractor = EnglishDefinitionExtractor(DefinitionPatternRegistry())
+        default_defs = get_definition_list_in_sentence(coords)
+        custom_defs = extractor.get_definition_list_in_sentence(coords)
+        self.assertEqual([d.name for d in default_defs], [d.name for d in custom_defs])
 
     def test_definition_quoted(self):
         sentence = '''THIS DEED OF TRUST, ASSIGNMENT, SECURITY AGREEMENT AND FINANCING
@@ -81,7 +100,7 @@ of Trust") dated August 29, 1997, is executed and
         self.assertEqual(1, len(definitions))
 
     def test_noun_pattern_false_positive(self):
-        ptrn = NOUN_PTN_RE
+        ptrn = DEFAULT_PATTERN_REGISTRY.get('noun').regex
         text = "Bonds in a commercial paper mode are remarketed for various periods that can be no longer than " + \
                "270 days and are established at the beginning of each commercial paper rate period."
         matches = list(ptrn.finditer(text))
