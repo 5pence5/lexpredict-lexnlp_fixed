@@ -7,14 +7,21 @@ import argparse
 import json
 import os
 import pickle
+import shutil
 import subprocess
 import sys
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Sequence
+from tempfile import TemporaryDirectory
 
-from cloudpickle import load
+from lexnlp.ml.artifact_io import atomic_pickle_dump
 
+if __package__:
+    from ._artifact_transaction import publish_staged_files
+else:
+    from _artifact_transaction import publish_staged_files
 
 DEFAULT_FIXTURE = Path(
     "test_data/lexnlp/extract/en/contracts/tests/test_contracts/test_is_contract.csv"
@@ -164,14 +171,14 @@ import json
 import sys
 import warnings
 from pathlib import Path
-from cloudpickle import load
+from lexnlp.utils.unpickler import load_sklearn_model
 
 token = sys.argv[2]
 path = Path(sys.argv[1])
 with warnings.catch_warnings(record=True) as captured:
     warnings.simplefilter("always")
     with path.open("rb") as model_file:
-        load(model_file)
+        load_sklearn_model(model_file)
 
 messages = [
     str(item.message).splitlines()[0]
@@ -189,15 +196,65 @@ print(json.dumps(messages))
     return json.loads(result.stdout.strip() or "[]")
 
 
+def _stage_catalog_artifact(source: Path, destination: Path) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        os.link(source, destination, follow_symlinks=False)
+    except OSError:
+        shutil.copy2(source, destination)
+
+
+@contextmanager
+def isolated_quality_gate_catalog(
+    *,
+    source_tag: str,
+    target_tag: str,
+    source_path: Path,
+    candidate_path: Path,
+) -> Iterator[None]:
+    """Expose a candidate to the tag-based gate without publishing it."""
+    with TemporaryDirectory(prefix="lexnlp-contract-quality-gate-") as temporary:
+        nltk_data_root = Path(temporary)
+        catalog_root = nltk_data_root / "lexpredict-lexnlp"
+        _stage_catalog_artifact(
+            source_path,
+            catalog_root / source_tag / source_path.name,
+        )
+        _stage_catalog_artifact(
+            candidate_path,
+            catalog_root / target_tag / source_path.name,
+        )
+
+        had_nltk_data = "NLTK_DATA" in os.environ
+        previous_nltk_data = os.environ.get("NLTK_DATA")
+        nltk_data_paths = [str(nltk_data_root)]
+        if previous_nltk_data:
+            nltk_data_paths.append(previous_nltk_data)
+        os.environ["NLTK_DATA"] = os.pathsep.join(nltk_data_paths)
+        try:
+            yield
+        finally:
+            if had_nltk_data:
+                assert previous_nltk_data is not None
+                os.environ["NLTK_DATA"] = previous_nltk_data
+            else:
+                os.environ.pop("NLTK_DATA", None)
+
+
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
     if args.source_tag == args.target_tag:
         raise ValueError("--source-tag and --target-tag must differ")
 
-    from lexnlp import __version__ as lexnlp_version
     from lexnlp.extract.en.contracts.predictors import ProbabilityPredictorIsContract
+    from lexnlp.ml.artifact_abi import (
+        artifact_metadata,
+        assert_model_artifact_runtime,
+    )
     from lexnlp.ml.catalog import CATALOG
-    from sklearn import __version__ as sklearn_version
+    from lexnlp.utils.unpickler import load_sklearn_model
+
+    assert_model_artifact_runtime()
 
     source_path = ensure_tag_downloaded(args.source_tag)
     destination_dir = CATALOG / args.target_tag
@@ -212,77 +269,120 @@ def main(argv: Sequence[str]) -> int:
     destination_dir.mkdir(parents=True, exist_ok=True)
 
     with source_path.open("rb") as source_file:
-        pipeline = load(source_file)
+        pipeline = load_sklearn_model(source_file)
 
     # Validate and apply runtime compatibility patches before re-serializing.
     ProbabilityPredictorIsContract(pipeline=pipeline)
-
-    # Use stdlib pickle for re-export so sklearn writes current runtime metadata.
-    with destination_path.open("wb") as destination_file:
-        pickle.dump(pipeline, destination_file)
 
     default_metadata_path = Path("artifacts/model_reexports") / (
         f"{args.target_tag.replace('/', '__')}.metadata.json"
     )
     metadata_path = args.output_metadata_json or default_metadata_path
-    metadata_path.parent.mkdir(parents=True, exist_ok=True)
-    metadata_payload = {
-        "created_at_utc": datetime.now(timezone.utc).isoformat(),
-        "source_tag": args.source_tag,
-        "target_tag": args.target_tag,
-        "source_model_path": str(source_path),
-        "target_model_path": str(destination_path),
-        "fixture": str(args.fixture),
-        "min_probability": args.min_probability,
-        "runtime": {
-            "python": sys.version.split()[0],
-            "scikit_learn": sklearn_version,
-            "lexnlp": lexnlp_version,
-        },
-    }
-    metadata_path.write_text(
-        json.dumps(metadata_payload, indent=2, sort_keys=True),
-        encoding="utf-8",
+    metadata_identity = metadata_path.resolve(strict=False)
+    if metadata_identity in {
+        source_path.resolve(strict=False),
+        destination_path.resolve(strict=False),
+    }:
+        raise ValueError(
+            "Metadata output must differ from the source and destination "
+            f"model paths: {metadata_path}"
+        )
+
+    quality_gate_message = (
+        "re-export: skipping quality gate by request"
+        if args.skip_quality_gate
+        else "re-export: quality gate passed"
     )
+    with TemporaryDirectory(prefix="lexnlp-contract-reexport-") as temporary:
+        staging_root = Path(temporary)
+        candidate_path = staging_root / source_path.name
+
+        # Use stdlib pickle so sklearn writes current runtime metadata. Reload
+        # the exact candidate bytes before any destination becomes visible.
+        atomic_pickle_dump(
+            pipeline,
+            candidate_path,
+            protocol=pickle.HIGHEST_PROTOCOL,
+        )
+        with candidate_path.open("rb") as candidate_file:
+            candidate_pipeline = load_sklearn_model(candidate_file)
+        ProbabilityPredictorIsContract(pipeline=candidate_pipeline)
+
+        source_legacy_warning_messages = get_legacy_warning_messages(source_path)
+        candidate_legacy_warning_messages = get_legacy_warning_messages(
+            candidate_path
+        )
+        source_legacy_warning_count = len(source_legacy_warning_messages)
+        candidate_legacy_warning_count = len(candidate_legacy_warning_messages)
+        warning_summary = (
+            "re-export: legacy sklearn warnings "
+            f"(source={source_legacy_warning_count}, "
+            f"candidate={candidate_legacy_warning_count})"
+        )
+
+        warning_regression = (
+            candidate_legacy_warning_count - source_legacy_warning_count
+        )
+        if warning_regression > args.max_legacy_warning_regression:
+            print(warning_summary)
+            print(
+                "re-export: legacy warning regression exceeds threshold "
+                f"({warning_regression} > "
+                f"{args.max_legacy_warning_regression})"
+            )
+            if candidate_legacy_warning_messages:
+                print("re-export: candidate legacy warnings:")
+                for message in candidate_legacy_warning_messages:
+                    print(f"  - {message}")
+            return 1
+
+        print(warning_summary)
+        if not args.skip_quality_gate:
+            with isolated_quality_gate_catalog(
+                source_tag=args.source_tag,
+                target_tag=args.target_tag,
+                source_path=source_path,
+                candidate_path=candidate_path,
+            ):
+                run_quality_gate(
+                    source_tag=args.source_tag,
+                    target_tag=args.target_tag,
+                    fixture=args.fixture,
+                    baseline_metrics_json=args.baseline_metrics_json,
+                    min_probability=args.min_probability,
+                    max_accuracy_regression=args.max_accuracy_regression,
+                    max_f1_regression=args.max_f1_regression,
+                )
+
+        artifact_details = artifact_metadata(candidate_path)
+        artifact_details["artifact_path"] = str(destination_path)
+        metadata_payload = {
+            "created_at_utc": datetime.now(timezone.utc).isoformat(),
+            "source_tag": args.source_tag,
+            "target_tag": args.target_tag,
+            "source_model_path": str(source_path),
+            "target_model_path": str(destination_path),
+            "fixture": str(args.fixture),
+            "min_probability": args.min_probability,
+            **artifact_details,
+        }
+        staged_metadata_path = staging_root / "metadata" / metadata_path.name
+        staged_metadata_path.parent.mkdir(parents=True, exist_ok=True)
+        staged_metadata_path.write_text(
+            json.dumps(metadata_payload, indent=2, sort_keys=True),
+            encoding="utf-8",
+        )
+
+        publish_staged_files(
+            (
+                (destination_path, candidate_path),
+                (metadata_path, staged_metadata_path),
+            )
+        )
 
     print(f"re-export: wrote model to {destination_path}")
     print(f"re-export: wrote metadata to {metadata_path}")
-
-    source_legacy_warning_messages = get_legacy_warning_messages(source_path)
-    candidate_legacy_warning_messages = get_legacy_warning_messages(destination_path)
-    source_legacy_warning_count = len(source_legacy_warning_messages)
-    candidate_legacy_warning_count = len(candidate_legacy_warning_messages)
-    print(
-        "re-export: legacy sklearn warnings "
-        f"(source={source_legacy_warning_count}, candidate={candidate_legacy_warning_count})"
-    )
-
-    warning_regression = candidate_legacy_warning_count - source_legacy_warning_count
-    if warning_regression > args.max_legacy_warning_regression:
-        print(
-            "re-export: legacy warning regression exceeds threshold "
-            f"({warning_regression} > {args.max_legacy_warning_regression})"
-        )
-        if candidate_legacy_warning_messages:
-            print("re-export: candidate legacy warnings:")
-            for message in candidate_legacy_warning_messages:
-                print(f"  - {message}")
-        return 1
-
-    if args.skip_quality_gate:
-        print("re-export: skipping quality gate by request")
-    else:
-        run_quality_gate(
-            source_tag=args.source_tag,
-            target_tag=args.target_tag,
-            fixture=args.fixture,
-            baseline_metrics_json=args.baseline_metrics_json,
-            min_probability=args.min_probability,
-            max_accuracy_regression=args.max_accuracy_regression,
-            max_f1_regression=args.max_f1_regression,
-        )
-        print("re-export: quality gate passed")
-
+    print(quality_gate_message)
     return 0
 
 

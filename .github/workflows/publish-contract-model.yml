@@ -10,8 +10,13 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: publish-contract-model-${{ github.repository }}
+  cancel-in-progress: false
+
 env:
-  PYTHON_VERSION: "3.11"
+  PYTHON_VERSION: "3.12.13"
+  MODEL_ARTIFACT_CONSTRAINTS: "constraints/model-artifact-abi.txt"
   # Ensure publish workflows work on forks even if the fork does not host the
   # upstream model/corpus release tags needed for training/re-export.
   LEXNLP_MODELS_REPO_SLUG: "LexPredict/lexpredict-lexnlp"
@@ -26,43 +31,99 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v6
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.12.0"
+          prune-cache: true
 
-      - name: Install dependencies
+      - name: Install artifact and latest dependency stacks
         run: |
-          uv venv .venv --python "${PYTHON_VERSION}"
-          uv sync --frozen --python .venv/bin/python
+          uv venv .venv-artifact --python "${PYTHON_VERSION}"
+          uv pip install \
+            --python .venv-artifact/bin/python \
+            --constraint "${MODEL_ARTIFACT_CONSTRAINTS}" \
+            -e .
+          uv venv .venv-latest --python "${PYTHON_VERSION}"
+          UV_PROJECT_ENVIRONMENT=.venv-latest uv sync --frozen
+          uv pip check --python .venv-latest/bin/python
+          .venv-latest/bin/python - <<'PY'
+          from importlib.metadata import version
+          from pathlib import Path
+          import sys
 
-      - name: Re-export contract model
+          expected = Path(".venv-latest").resolve()
+          actual = Path(sys.prefix).resolve()
+          assert actual == expected, f"uv synced {actual}, expected {expected}"
+          for package in (
+              "joblib",
+              "numpy",
+              "pandas",
+              "scikit-learn",
+              "scipy",
+              "threadpoolctl",
+          ):
+              print(f"{package}=={version(package)}")
+          PY
+
+      - name: Re-export contract model with minimum artifact ABI
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
-          .venv/bin/python scripts/reexport_contract_model.py \
+          .venv-artifact/bin/python scripts/reexport_contract_model.py \
             --source-tag "${SOURCE_TAG}" \
             --target-tag "${MODEL_TAG}" \
             --baseline-metrics-json "${BASELINE_METRICS}" \
-            --output-metadata-json "artifacts/model_reexports/${MODEL_TAG//\\//__}.metadata.json" \
+            --output-metadata-json artifacts/model_reexports/contract-model.metadata.json \
             --skip-quality-gate \
             --force
 
-      - name: Run contract model quality gate
+      - name: Run contract model quality gate with minimum artifact ABI
         env:
           GITHUB_TOKEN: ${{ github.token }}
           LEXNLP_IS_CONTRACT_MODEL_TAG: ${{ env.MODEL_TAG }}
         run: |
-          .venv/bin/python scripts/model_quality_gate.py \
+          .venv-artifact/bin/python scripts/model_quality_gate.py \
             --baseline-tag "${SOURCE_TAG}" \
             --candidate-tag "${MODEL_TAG}" \
             --baseline-metrics-json "${BASELINE_METRICS}" \
-            --output-json artifacts/model_quality_gate.json \
+            --output-json artifacts/model_quality_gate.minimum.json \
+            --max-accuracy-regression 0.0 \
+            --max-f1-regression 0.0
+
+      - name: Direct-load model with latest dependencies
+        env:
+          LEXNLP_IS_CONTRACT_MODEL_TAG: ${{ env.MODEL_TAG }}
+        run: |
+          .venv-latest/bin/python - <<'PY'
+          from lexnlp.extract.en.contracts.predictors import ProbabilityPredictorIsContract
+
+          predictor = ProbabilityPredictorIsContract()
+          result = predictor.is_contract(
+              "This Employment Agreement is entered into on January 1, 2024.",
+              return_probability=True,
+          )
+          assert len(result) == 2
+          print(result)
+          PY
+
+      - name: Run contract model quality gate with latest dependencies
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          LEXNLP_IS_CONTRACT_MODEL_TAG: ${{ env.MODEL_TAG }}
+        run: |
+          .venv-latest/bin/python scripts/model_quality_gate.py \
+            --baseline-tag "${SOURCE_TAG}" \
+            --candidate-tag "${MODEL_TAG}" \
+            --baseline-metrics-json "${BASELINE_METRICS}" \
+            --output-json artifacts/model_quality_gate.latest.json \
             --max-accuracy-regression 0.0 \
             --max-f1-regression 0.0
 
@@ -72,7 +133,7 @@ jobs:
           LEXNLP_IS_CONTRACT_MODEL_TAG: ${{ env.MODEL_TAG }}
         run: |
           MODEL_PATH="$(
-            .venv/bin/python - <<'PY'
+            .venv-latest/bin/python - <<'PY'
           from lexnlp.ml.catalog import get_path_from_catalog
           import os
 
@@ -85,13 +146,32 @@ jobs:
           test -f "${MODEL_PATH}"
           echo "model_path=${MODEL_PATH}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify release bytes against trusted manifest
+        env:
+          MODEL_PATH: ${{ steps.locate.outputs.model_path }}
+        run: |
+          .venv-artifact/bin/python - <<'PY'
+          import os
+          from lexnlp.ml.catalog.download import verify_trusted_asset_file
+
+          trusted = verify_trusted_asset_file(
+              os.environ["MODEL_PATH"],
+              os.environ["MODEL_TAG"],
+          )
+          print(
+              f"trusted release artifact tag={trusted.tag} "
+              f"size={trusted.size} sha256={trusted.sha256}"
+          )
+          PY
+
       - name: Upload training + gate artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: contract-model-reexport
           path: |
             artifacts/model_reexports/*.metadata.json
-            artifacts/model_quality_gate.json
+            artifacts/model_quality_gate.minimum.json
+            artifacts/model_quality_gate.latest.json
           if-no-files-found: error
 
       - name: Create release if missing

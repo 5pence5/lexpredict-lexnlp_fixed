@@ -6,6 +6,121 @@ __maintainer__ = "LexPredict, LLC"
 __email__ = "support@contraxsuite.com"
 
 
+def test_collect_samples_uses_every_canonical_member_when_cap_is_zero(tmp_path):
+    import io
+    import tarfile
+
+    from lexnlp.extract.en.contracts import runtime_model
+
+    archive_path = tmp_path / "corpus.tar"
+    expected = [
+        ("CONTRACT_TYPES/A/z.txt", "first"),
+        ("CONTRACT_TYPES/A/a.txt", "second"),
+        ("CONTRACT_TYPES/A/m.txt", "third"),
+        ("CONTRACT_TYPES/B/b.txt", "fourth"),
+    ]
+    with tarfile.open(archive_path, "w") as archive:
+        for name, text in expected:
+            payload = text.encode()
+            member = tarfile.TarInfo(name)
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+
+    first = runtime_model.collect_contract_type_samples(
+        archive_path,
+        max_docs_per_label=0,
+        head_character_n=100,
+    )
+    second = runtime_model.collect_contract_type_samples(
+        archive_path,
+        max_docs_per_label=0,
+        head_character_n=100,
+    )
+
+    assert first == second
+    assert first == (
+        ["first", "second", "third", "fourth"],
+        ["A", "A", "A", "B"],
+        {"A": 3, "B": 1},
+    )
+
+
+def test_collect_samples_applies_positive_per_label_cap(tmp_path):
+    import io
+    import tarfile
+
+    from lexnlp.extract.en.contracts import runtime_model
+
+    archive_path = tmp_path / "corpus.tar"
+    with tarfile.open(archive_path, "w") as archive:
+        for index in range(3):
+            payload = f"sample-{index}".encode()
+            member = tarfile.TarInfo(f"CONTRACT_TYPES/A/{index}.txt")
+            member.size = len(payload)
+            archive.addfile(member, io.BytesIO(payload))
+        payload = b"other"
+        member = tarfile.TarInfo("CONTRACT_TYPES/B/0.txt")
+        member.size = len(payload)
+        archive.addfile(member, io.BytesIO(payload))
+
+    texts, labels, counts = runtime_model.collect_contract_type_samples(
+        archive_path,
+        max_docs_per_label=2,
+        head_character_n=100,
+    )
+
+    assert texts == ["sample-0", "sample-1", "other"]
+    assert labels == ["A", "A", "B"]
+    assert counts == {"A": 2, "B": 1}
+
+
+def test_write_pipeline_reuses_only_a_valid_existing_artifact(monkeypatch, tmp_path):
+    from lexnlp.extract.en.contracts import runtime_model
+    from lexnlp.ml import catalog
+
+    monkeypatch.setattr(catalog, "CATALOG", tmp_path)
+    destination = runtime_model.write_pipeline_to_catalog(
+        pipeline={"version": 1},
+        target_tag="pipeline/test/0.1",
+        force=True,
+    )
+    original_bytes = destination.read_bytes()
+
+    reused = runtime_model.write_pipeline_to_catalog(
+        pipeline={"version": 2},
+        target_tag="pipeline/test/0.1",
+        force=False,
+    )
+
+    assert reused == destination
+    assert destination.read_bytes() == original_bytes
+
+
+def test_write_pipeline_atomically_repairs_a_corrupt_existing_artifact(
+    monkeypatch,
+    tmp_path,
+):
+    from lexnlp.extract.en.contracts import runtime_model
+    from lexnlp.ml import catalog
+    from lexnlp.utils.unpickler import load_sklearn_model
+
+    monkeypatch.setattr(catalog, "CATALOG", tmp_path)
+    destination = tmp_path / "pipeline/test/0.1" / runtime_model.CONTRACT_TYPE_MODEL_FILENAME
+    destination.parent.mkdir(parents=True)
+    destination.write_bytes(b"truncated pickle")
+
+    repaired = runtime_model.write_pipeline_to_catalog(
+        pipeline={"version": 2},
+        target_tag="pipeline/test/0.1",
+        force=False,
+    )
+
+    assert repaired == destination
+    with repaired.open("rb") as model_file:
+        assert load_sklearn_model(model_file) == {"version": 2}
+    assert not list(destination.parent.glob(f".{destination.name}.*.tmp"))
+
+
 def test_ensure_runtime_contract_type_model_force_trains(monkeypatch, tmp_path):
     """
     Regression test: force=True should bypass reusing/downloading the target tag and
@@ -25,8 +140,16 @@ def test_ensure_runtime_contract_type_model_force_trains(monkeypatch, tmp_path):
         calls.append(("collect_contract_type_samples", max_docs_per_label, head_character_n))
         return ["doc-a", "doc-b"], ["A", "B"], {"A": 1, "B": 1}
 
-    def train_pipeline(texts, labels, *, random_state: int):
-        calls.append(("train_contract_type_pipeline", len(texts), len(labels), random_state))
+    def train_pipeline(texts, labels, *, random_state: int, max_features: int):
+        calls.append(
+            (
+                "train_contract_type_pipeline",
+                len(texts),
+                len(labels),
+                random_state,
+                max_features,
+            )
+        )
         return object()
 
     def write_pipeline(*, pipeline, target_tag: str, force: bool):
@@ -54,4 +177,4 @@ def test_ensure_runtime_contract_type_model_force_trains(monkeypatch, tmp_path):
 
     assert result == tmp_path / "pipeline_contract_type_classifier.cloudpickle"
     assert ("write_pipeline_to_catalog", runtime_model.RUNTIME_CONTRACT_TYPE_TAG, True) in calls
-
+    assert ("train_contract_type_pipeline", 2, 2, 7, 75_000) in calls

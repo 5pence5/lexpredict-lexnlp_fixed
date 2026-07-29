@@ -61,13 +61,12 @@ class ProbabilityPredictorIsContract(ProbabilityPredictor):
             )
 
             try:
-                from cloudpickle import load
-
                 from lexnlp.ml.catalog import get_path_from_catalog
+                from lexnlp.utils.unpickler import load_sklearn_model
 
                 legacy_path = get_path_from_catalog(cls._LEGACY_FALLBACK_PIPELINE)
                 with legacy_path.open("rb") as legacy_file:
-                    return load(legacy_file)
+                    return load_sklearn_model(legacy_file)
             except Exception as fallback_error:
                 raise RuntimeError(
                     "Failed to load default contract model and legacy fallback model. "
@@ -216,7 +215,8 @@ class ProbabilityPredictorContractType(ProbabilityPredictor):
                 The second-highest prediction probability must be this less than
                 the highest prediction probability multiplied by this value.
 
-                That is, if `predictions[1] > (predictions[0] * max_closest_probability)`,
+                That is, if `predictions.iloc[1] >
+                (predictions.iloc[0] * max_closest_probability)`,
                 then the `unknown_classification` will be returned.
 
             unknown_classification (str=''):
@@ -229,11 +229,16 @@ class ProbabilityPredictorContractType(ProbabilityPredictor):
         if predictions.empty:
             return unknown_classification
 
-        if predictions[0] < min_probability:
+        highest_probability = predictions.iloc[0]
+        if highest_probability < min_probability:
             return unknown_classification
 
-        next_closest_probability: float = 0.0 if len(predictions) < 2 else predictions[1]
-        if next_closest_probability > (predictions[0] * max_closest_probability):
+        next_closest_probability: float = (
+            0.0 if len(predictions) < 2 else predictions.iloc[1]
+        )
+        if next_closest_probability > (
+            highest_probability * max_closest_probability
+        ):
             return unknown_classification
 
         return predictions.index[0]
@@ -260,7 +265,8 @@ class ProbabilityPredictorContractType(ProbabilityPredictor):
                 The second-highest prediction probability must be this less than
                 the highest prediction probability multiplied by this value.
 
-                That is, if `predictions[1] > (predictions[0] * max_closest_probability)`,
+                That is, if `predictions.iloc[1] >
+                (predictions.iloc[0] * max_closest_probability)`,
                 then the `unknown_classification` will be returned.
 
             unknown_classification (str=''):

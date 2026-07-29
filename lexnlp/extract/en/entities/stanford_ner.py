@@ -65,7 +65,7 @@ def get_persons(text, strict=False, return_source=False, window=2) -> Generator:
     # Iterate through sentences
     for sentence in get_sentence_list(text):
         # Tag sentence
-        sentence_pos = STANFORD_NER_TAGGER.tag(get_tokens_list(text))
+        sentence_pos = STANFORD_NER_TAGGER.tag(get_tokens_list(sentence))
 
         # Iterate through chunks
         names = []
@@ -105,7 +105,7 @@ def get_organizations(text, strict=False, return_source=False, window=2) -> Gene
     # Iterate through sentences
     for sentence in get_sentence_list(text):
         # Tag sentence
-        sentence_pos = STANFORD_NER_TAGGER.tag(get_tokens_list(text))
+        sentence_pos = STANFORD_NER_TAGGER.tag(get_tokens_list(sentence))
 
         # Iterate through chunks
         orgs = []
@@ -145,7 +145,7 @@ def get_locations(text, strict=False, return_source=False, window=2) -> Generato
     # Iterate through sentences
     for sentence in get_sentence_list(text):
         # Tag sentence
-        sentence_pos = STANFORD_NER_TAGGER.tag(get_tokens_list(text))
+        sentence_pos = STANFORD_NER_TAGGER.tag(get_tokens_list(sentence))
 
         # Iterate through chunks
         locations = []

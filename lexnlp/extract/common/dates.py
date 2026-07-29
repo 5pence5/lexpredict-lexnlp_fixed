@@ -86,13 +86,16 @@ class DateParser:
         text = text or self.text
         # INFO: 'DATE_ORDER': 'DMY' prevents parsing date like 2004-12-13T00:00:00Z,
         #  use SKIP_TOKENS setting if needed along with DATE_ORDER
-        old_strict_mode = self.dateparser_settings['STRICT_PARSING']
-        self.dateparser_settings['STRICT_PARSING'] = strict
-        old_date_order = self.dateparser_settings['PREFER_DAY_OF_MONTH']
-        self.dateparser_settings['DATE_ORDER'] = LocaleInfoImport(self.locale).date_order
-        dates = search_dates(text, languages=[self.locale.language], settings=self.dateparser_settings)
-        self.dateparser_settings['STRICT_PARSING'] = old_strict_mode
-        self.dateparser_settings['DATE_ORDER'] = old_date_order
+        settings = {
+            **self.dateparser_settings,
+            'STRICT_PARSING': strict,
+            'DATE_ORDER': LocaleInfoImport(self.locale).date_order,
+        }
+        dates = search_dates(
+            text,
+            languages=[self.locale.language],
+            settings=settings,
+        )
         return dates or []
 
     def get_extra_dates(self, strict: bool):
@@ -143,18 +146,23 @@ class DateParser:
                              locale: Optional[Locale] = None,
                              strict: bool = True) -> \
             Generator[DateAnnotation, None, None]:
-        self.text = text.replace('\n', ' ') or self.text
-        self.locale.language = (locale.language if locale else "") or self.locale.language
+        source_text = text if text is not None else self.text
+        if source_text is None:
+            raise RuntimeError('Define text and language.')
+        if not source_text:
+            return
 
-        if not self.text or not self.locale.language:
+        self.text = source_text.replace('\n', ' ')
+        if locale is not None:
+            self.locale = Locale(locale.get_locale())
+        if not self.locale.language:
             raise RuntimeError('Define text and language.')
 
         # First try dateparser searcher
         try:
-            self.dates = self.get_dateparser_dates(text, strict)
-        except Exception as e:
-            # TODO: add logging
-            print(str(e))
+            self.dates = self.get_dateparser_dates(self.text, strict)
+        except (OverflowError, TypeError, ValueError):
+            self.dates = []
 
         # Next try custom search logic
         self.get_extra_dates(strict)

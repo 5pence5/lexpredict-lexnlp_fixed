@@ -9,13 +9,17 @@ __maintainer__ = "LexPredict, LLC"
 __email__ = "support@contraxsuite.com"
 
 
-import os
-import requests
-import codecs
+from pathlib import Path
+
+import pytest
 
 from lexnlp import get_module_path
+from lexnlp.nlp.en.segments import titles
 from lexnlp.nlp.en.segments.titles import get_titles
 from unittest import TestCase
+
+
+TEST_DATA_PATH = Path(get_module_path()).parent / "test_data"
 
 
 class TestTitles(TestCase):
@@ -24,25 +28,15 @@ class TestTitles(TestCase):
         """
         Test first example title.
         """
-        # Setup URL
-        url = "https://raw.githubusercontent.com/LexPredict/lexpredict-contraxsuite-samples/master/agreements/" + \
-              "construction/1000694_2002-03-15_AGREEMENT%20OF%20LEASE-W.M.RICKMAN%20CONSTRUCTION%20CO..txt"
-
-        # Download file
-        file_text = requests.get(url).text
-
+        file_text = (TEST_DATA_PATH / "1205332_2008-05-08_3").read_text(encoding="utf-8")
         self.assertEqual(['LEASE AGREEMENT'], list(get_titles(file_text)))
 
     def test_title_2(self):
         """
         Test second example title.
         """
-        # Open file
-        test_file_path = os.path.join(get_module_path(), '..', 'test_data', '1100644_2016-11-21')
-        with codecs.open(test_file_path, 'r', encoding='utf-8') as file_handle:
-            # Read and parse
-            file_text = file_handle.read()
-            self.assertEqual(['VALIDIAN SOFTWARE LICENSE AGREEMENT'], list(get_titles(file_text)))
+        file_text = (TEST_DATA_PATH / "1100644_2016-11-21").read_text(encoding="utf-8")
+        self.assertEqual(['VALIDIAN SOFTWARE LICENSE AGREEMENT'], list(get_titles(file_text)))
 
     def test_title_3(self):
         """
@@ -65,3 +59,47 @@ class TestTitles(TestCase):
            45% Stormwater Utility Bill Collection Rate 94% 98% 95% 95% 95%
            Average Response Time for...', 1, , ...)"""
         self.assertEqual(0, len(list(get_titles(text))))
+
+
+def test_title_training_download_has_timeout(monkeypatch):
+    class Response:
+        text = "training document"
+
+        def raise_for_status(self):
+            calls.append("raise_for_status")
+
+    calls = []
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setattr(titles.requests, "get", fake_get)
+
+    assert titles._download_training_document("https://example.test/document") == (
+        "training document"
+    )
+    assert calls == [
+        (
+            "https://example.test/document",
+            {"timeout": titles.TITLE_TRAINING_REQUEST_TIMEOUT},
+        ),
+        "raise_for_status",
+    ]
+
+
+def test_title_training_download_rejects_http_error(monkeypatch):
+    class Response:
+        text = "<html>not found</html>"
+
+        def raise_for_status(self):
+            raise titles.requests.HTTPError("404 Client Error")
+
+    monkeypatch.setattr(
+        titles.requests,
+        "get",
+        lambda *_args, **_kwargs: Response(),
+    )
+
+    with pytest.raises(titles.requests.HTTPError, match="404"):
+        titles._download_training_document("https://example.test/missing")

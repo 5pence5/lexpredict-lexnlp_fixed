@@ -1,108 +1,108 @@
-[![Build Status](https://travis-ci.org/LexPredict/lexpredict-lexnlp.svg?branch=master)](https://travis-ci.org/LexPredict/lexpredict-lexnlp) [![Coverage Status](https://coveralls.io/repos/github/LexPredict/lexpredict-lexnlp/badge.svg?branch=master)](https://coveralls.io/github/LexPredict/lexpredict-lexnlp?branch=0.1.8) [![](https://tokei.rs/b1/github/lexpredict/lexpredict-lexnlp?category=code)](https://github.com/lexpredict/lexpredict-lexnlp) [![Docs](https://readthedocs.org/projects/lexpredict-lexnlp/badge/?version=docs-0.1.6)](http://lexpredict-lexnlp.readthedocs.io/en/docs-0.1.6/)
+[![CI](https://github.com/LexPredict/lexpredict-lexnlp/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/LexPredict/lexpredict-lexnlp/actions/workflows/ci.yml)
+[![Documentation](https://readthedocs.org/projects/lexpredict-lexnlp/badge/?version=latest)](https://lexpredict-lexnlp.readthedocs.io/en/latest/)
 
 # LexNLP by LexPredict
-## Information retrieval and extraction for real, unstructured legal text
-LexNLP is a library for working with real, unstructured legal text, including contracts, plans, policies, procedures,
-and other material.
-## LexNLP provides functionality such as:
-* Segmentation and tokenization, such as
-    * A sentence parser that is aware of common legal abbreviations like LLC. or F.3d.
-    * Pre-trained segmentation models for legal concepts such as pages or sections.
-* Pre-trained word embedding and topic models, broadly and for specific practice areas
-* Pre-trained classifiers for document type and clause type
-* Broad range of fact extraction, such as:
-    * Monetary amounts, non-monetary amounts, percentages, ratios
-    * Conditional statements and constraints, like "less than" or "later than"
-    * Dates, recurring dates, and durations
-    * Courts, regulations, and citations
-* Tools for building new clustering and classification methods
-* Hundreds of unit tests from real legal documents
 
-![Logo](https://s3.amazonaws.com/lexpredict.com-marketing/graphics/lexpredict_lexnlp_logo_horizontal_1.png)
+LexNLP is a Python library for working with real, unstructured legal text,
+including contracts, plans, policies, and procedures.
 
-# Information
-* ContraxSuite: https://contraxsuite.com/
-* LexPredict: https://lexpredict.com/
-* Official Website: https://lexnlp.com/
-* Documentation: http://lexpredict-lexnlp.readthedocs.io/en/latest/ (in progress)
-* Contact: support@contraxsuite.com
+It provides:
 
-## Structure
-* ContraxSuite web application: https://github.com/LexPredict/lexpredict-contraxsuite
-* LexNLP library for extraction: https://github.com/LexPredict/lexpredict-lexnlp
-* ContraxSuite pre-trained models and "knowledge sets": https://github.com/LexPredict/lexpredict-legal-dictionary
-* ContraxSuite agreement samples: https://github.com/LexPredict/lexpredict-contraxsuite-samples
-* ContraxSuite deployment automation: https://github.com/LexPredict/lexpredict-contraxsuite-deploy
-Please note that ContraxSuite installations generally require trained models or knowledge sets for usage.
-
-## Licensing
-LexNLP is available under a dual-licensing model.  By default, this library can be used under AGPLv3 terms as detailed
-in the repository LICENSE file; however, organizations can request a release from the AGPL terms or a non-GPL
-evaluation license
-by contacting ContraxSuite Licensing at <<license@contraxsuite.com>>.
+- legal-aware sentence, paragraph, page, section, and title segmentation;
+- extraction of amounts, money, percentages, ratios, dates, durations,
+  conditions, constraints, courts, regulations, citations, and other facts;
+- English, German, and Spanish extraction components;
+- pre-trained segmentation and classification models; and
+- utilities for building legal-text clustering and classification workflows.
 
 ## Requirements
-* Python 3.11 (default; supported range is defined in `pyproject.toml`)
-* `uv`
 
-## Quick Setup (uv + pyproject)
+- Python 3.10, 3.11, 3.12, or 3.13
+- [`uv`](https://docs.astral.sh/uv/) for the reproducible development workflow
+- Java 11 or newer only when using the optional Stanford or Apache Tika
+  integrations
+
+## Quick start
+
 ```bash
-cd /Users/jackeames/Downloads/LexNLP
-uv python install 3.11
-uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -e ".[dev,test]"
-./.venv/bin/python scripts/bootstrap_assets.py --nltk --contract-model
+git clone https://github.com/LexPredict/lexpredict-lexnlp.git
+cd lexpredict-lexnlp
+uv python install 3.12
+uv sync --frozen --python 3.12 --extra dev --extra test
 ```
 
-## Deprecated Setup Variants
-`Pipfile`, `python-requirements.txt`, and `python-requirements-dev.txt` are deprecated and kept only for legacy reproduction. New development and CI updates should use `uv` with `pyproject.toml`.
+`uv sync` creates `.venv` and installs LexNLP in editable mode. For a minimal
+runtime environment, omit the `dev` and `test` extras.
 
-## Migration Runbook
-See `MIGRATION_RUNBOOK.md` for complete migration/triage/quality-gate procedures.
+## Data, models, and optional services
 
-## Test Integrity and Full Validation
-- Do not add/remove/modify `skip`, `skipif`, or `xfail` markers to bypass failing tests.
-- Target is **100% pass**.
-- If Stanford assets are enabled, 100% pass includes both base and Stanford-only suites.
+LexNLP deliberately keeps four kinds of supporting resources distinct:
+
+1. **Bundled models** ship inside the Python distribution. No download is
+   required.
+2. **NLTK data** is not bundled. Install the exact resource set used by LexNLP:
+
+   ```bash
+   .venv/bin/python scripts/bootstrap_assets.py --nltk
+   ```
+
+3. **Pipeline classifiers** are reproducibly derived from trusted inputs. The
+   is-contract bootstrap uses the pinned `0.1` release as its trusted source
+   and downloads `0.2` when published; before publication it re-exports a
+   local `0.2` candidate. The contract-type bootstrap builds or reuses the
+   runtime model from a pinned corpus:
+
+   ```bash
+   .venv/bin/python scripts/bootstrap_assets.py \
+     --contract-model \
+     --contract-type-model
+   ```
+
+4. **Stanford NLP and Apache Tika are optional Java integrations.** They are
+   not needed for LexNLP's core extractors:
+
+   ```bash
+   .venv/bin/python scripts/bootstrap_assets.py --stanford
+   .venv/bin/python scripts/bootstrap_assets.py --tika
+   LEXNLP_USE_TIKA=true scripts/run_tika.sh
+   ```
+
+The bootstrap verifies and atomically installs the pinned Stanford, Tika,
+model, and corpus assets. NLTK resources come from the official `nltk_data`
+repository, are verified against LexNLP's pinned SHA-256 catalog, and are
+installed in NLTK-compatible directories. The catalog includes both
+`omw-1.4` and `omw-2.0`.
+Persisted Python model files use pickle/joblib formats and must only be loaded
+from trusted LexNLP releases or another trusted producer.
+
+## Validation
 
 ```bash
-# Base suite
-./.venv/bin/pytest lexnlp
+.venv/bin/ruff check lexnlp scripts ci --select E4,E7,E9,F
+.venv/bin/python ci/skip_audit.py
+.venv/bin/python scripts/reexport_bundled_sklearn_models.py --check-current
+.venv/bin/pytest lexnlp
+```
 
-# Stanford-only suite (run when Stanford assets are installed)
-PATH=/opt/homebrew/opt/openjdk/bin:$PATH \
-LEXNLP_USE_STANFORD=true \
-./.venv/bin/pytest \
+Stanford-gated tests are a separate, explicitly provisioned suite:
+
+```bash
+LEXNLP_USE_STANFORD=true .venv/bin/pytest \
   lexnlp/nlp/en/tests/test_stanford.py \
   lexnlp/extract/en/entities/tests/test_stanford_ner.py
 ```
 
-## Releases
-* 2.3.0: November 30, 2022 - Twenty sixth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/2.3.0)
-* 2.2.1.0: August 10, 2022 - Twenty fifth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/2.2.1.0)
-* 2.2.0: July 7, 2022 - Twenty fourth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/2.2.0)
-* 2.1.0: September 16, 2021 - Twenty third scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/2.1.0)
-* 2.0.0: May 10, 2021 - Twenty second scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/2.0.0)
-* 1.8.0: December 2, 2020 - Twenty first scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/1.8.0)
-* 1.7.0: August 27, 2020 - Twentieth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/1.7.0)
-* 1.6.0: May 27, 2020 - Nineteenth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/1.6.0)
-* 1.4.0: December 20, 2019 - Eighteenth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/1.4.0)
-* 1.3.0: November 1, 2019 - Seventeenth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/1.3.0)
-* 0.2.7: August 1, 2019 - Sixteenth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.2.7)
-* 0.2.6: June 12, 2019 - Fifteenth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.2.6)
-* 0.2.5: March 1, 2019 - Fourteenth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.2.5)
-* 0.2.4: February 1, 2019 - Thirteenth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.2.4)
-* 0.2.3: Junuary 10, 2019 - Twelfth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.2.3)
-* 0.2.2: September 30, 2018 - Eleventh scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.2.2)
-* 0.2.1: August 24, 2018 - Tenth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.2.1)
-* 0.2.0: August 1, 2018 - Ninth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.2.0)
-* 0.1.9: July 1, 2018 - Ninth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.9)
-* 0.1.8: May 1, 2018 - Eighth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.8)
-* 0.1.7: April 1, 2018 - Seventh scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.7)
-* 0.1.6: March 1, 2018 - Sixth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.6)
-* 0.1.5: February 1, 2018 - Fifth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.5)
-* 0.1.4: January 1, 2018 - Fourth scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.4)
-* 0.1.3: December 1, 2017 - Third scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.3)
-* 0.1.2: November 1, 2017 - Second scheduled public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.2)
-* 0.1.1: October 2, 2017 - Bug fix release for 0.1.0; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.1)
-* 0.1.0: September 30, 2017 - First public release; [code](https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.0)
+See [MIGRATION_RUNBOOK.md](MIGRATION_RUNBOOK.md) for clean-environment,
+packaging, model-quality, and release validation procedures.
+
+## Project links
+
+- [Documentation](https://lexpredict-lexnlp.readthedocs.io/en/latest/)
+- [Source and release history](https://github.com/LexPredict/lexpredict-lexnlp)
+- [ContraxSuite](https://github.com/LexPredict/lexpredict-contraxsuite)
+- [LexPredict](https://lexpredict.com/)
+
+## License
+
+LexNLP is available under the AGPL-3.0-or-later terms in [LICENSE](LICENSE).
+Contact `support@contraxsuite.com` about alternative commercial licensing.

@@ -1,5 +1,14 @@
 import importlib
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
+
+
+def test_catalog_tags_use_posix_separators_on_windows():
+    import lexnlp.ml.catalog as catalog
+
+    root = PureWindowsPath(r"C:\nltk_data\lexpredict-lexnlp")
+    asset = root / "pipeline" / "is-contract" / "0.2" / "model.cloudpickle"
+
+    assert catalog._catalog_tag(asset, root) == "pipeline/is-contract/0.2"
 
 
 def test_catalog_path_resolves_on_fresh_environment(tmp_path):

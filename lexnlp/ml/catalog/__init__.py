@@ -11,7 +11,7 @@ __email__ = "support@contraxsuite.com"
 
 # standard library
 import os
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Dict, Optional
 
 # NLTK
@@ -66,6 +66,11 @@ CATALOG: Path = _resolve_catalog_dir()
 _TAG_DICT_CACHE: Optional[Dict[str, Path]] = None
 
 
+def _catalog_tag(path: PurePath, catalog: PurePath) -> str:
+    """Return a platform-independent release tag for a catalog asset."""
+    return path.parent.relative_to(catalog).as_posix()
+
+
 def _build_tag_dict() -> Dict[str, Path]:
     """
     Builds a dictionary with the following structure:
@@ -77,7 +82,7 @@ def _build_tag_dict() -> Dict[str, Path]:
         A dictionary.
     """
     return {
-        str(path.parent.relative_to(CATALOG)): path
+        _catalog_tag(path, CATALOG): path
         for path in CATALOG.rglob('*')
         if path.is_file()
     }

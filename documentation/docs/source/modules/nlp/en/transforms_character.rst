@@ -1,8 +1,8 @@
 .. _nlp_en_transforms_characters:
 
-============
+==============================================================================================
 :mod:`lexnlp.nlp.en.transforms.characters`: Transforming text into character-oriented features
-============
+==============================================================================================
 
 The :mod:`lexnlp.nlp.en.transforms.characters` module contains methods
 that transform text into character distributions or related feature vectors.
@@ -17,7 +17,6 @@ that transform text into character distributions or related feature vectors.
     - GitHub issues: https://github.com/LexPredict/lexpredict-lexnlp
     - Email: support@contraxsuite.com
 
-.. automodapi:: lexnlp.nlp.en.transforms.characters
-    :include-all-objects:
+.. automodule:: lexnlp.nlp.en.transforms.characters
     :members:
 

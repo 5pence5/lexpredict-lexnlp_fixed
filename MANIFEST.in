@@ -1,14 +1,13 @@
 include README.md
 include README.rst
 include index.rst
+include constraints/model-artifact-abi.txt
 exclude Pipfile
 exclude Pipfile.lock
 exclude python-requirements.txt
 exclude python-requirements-dev.txt
 exclude python-requirements-full.txt
-recursive-include lexnlp *.pickle
-recursive-include lexnlp/extract/en/addresses *.json *.txt *.xml
-recursive-include lexnlp *.csv
+recursive-include lexnlp *.csv *.json *.pickle *.pickle.gzip *.txt *.xml
 include libs/download_stanford_nlp.sh
 include libs/download_wiki.sh
 recursive-include scripts *.py *.sh

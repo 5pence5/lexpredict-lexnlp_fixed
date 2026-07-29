@@ -68,6 +68,46 @@ class TestParseEsDates(TestCase):
         self.assertEqual(datetime.datetime(1995, 11, 17, 0, 0), ants[2].date)
         self.assertEqual(datetime.datetime(1999, 1, 1, 0, 0), ants[3].date)
 
+    def test_sequential_dates_accept_legal_document_whitespace(self):
+        text = "Fechas: 15   de   febrero,\n28 de abril   y 17 de noviembre de 1995."
+        ants = sorted(
+            get_date_annotations(text=text, strict=False),
+            key=lambda ant: ant.coords[0],
+        )
+
+        self.assertEqual(
+            [
+                datetime.datetime(1995, 2, 15, 0, 0),
+                datetime.datetime(1995, 4, 28, 0, 0),
+                datetime.datetime(1995, 11, 17, 0, 0),
+            ],
+            [ant.date for ant in ants],
+        )
+        self.assertEqual(
+            ['15   de   febrero', '28 de abril', '17 de noviembre de 1995'],
+            [ant.text for ant in ants],
+        )
+
+    def test_sequential_date_split_across_linebreak(self):
+        text = (
+            "Some dummy sample with Spanish date like 15 de febrero, "
+            "28 de abril y 17 de\nnoviembre de 1995, "
+            "1ºde enero de 1999"
+        )
+
+        ants = list(get_date_annotations(text=text, strict=False))
+        ants.sort(key=lambda ant: ant.coords[0])
+
+        self.assertEqual(
+            [
+                ((41, 54), datetime.datetime(1995, 2, 15, 0, 0)),
+                ((56, 67), datetime.datetime(1995, 4, 28, 0, 0)),
+                ((70, 93), datetime.datetime(1995, 11, 17, 0, 0)),
+                ((95, 113), datetime.datetime(1999, 1, 1, 0, 0)),
+            ],
+            [(ant.coords, ant.date) for ant in ants],
+        )
+
     def test_file_samples(self):
         tester = TypedAnnotationsTester()
         tester.test_and_raise_errors(

@@ -8,6 +8,18 @@
       "sha256": "3acc29e44aed3ca4ac0a7066d96ccc817b3dd9f7df497fefcd057f0f3e1645df"
     },
     {
+      "tag": "pipeline/is-contract/0.2",
+      "filename": "pipeline_is_contract_classifier.cloudpickle",
+      "size": 38794068,
+      "sha256": "083bab9998e1b0d858b7a348f17c09af984264744b680407541723647cfbe9f6"
+    },
+    {
+      "tag": "pipeline/contract-type/0.2-runtime",
+      "filename": "pipeline_contract_type_classifier.cloudpickle",
+      "size": 33769286,
+      "sha256": "3b04a8a96e841a200dd85ba080ee14140be6a4a554e511dfd75d6dc080a9fab7"
+    },
+    {
       "tag": "corpus/contract-types/0.1",
       "filename": "CONTRACT_TYPES.tar.xz",
       "size": 16644740,
@@ -45,4 +57,3 @@
     }
   ]
 }
-

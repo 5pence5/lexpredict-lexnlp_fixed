@@ -12,17 +12,19 @@ __email__ = "support@contraxsuite.com"
 
 # standard library
 import logging
-import pickle
 import tarfile
 from collections import defaultdict
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence, Tuple
 
 # third-party imports
-from cloudpickle import load
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
+from threadpoolctl import threadpool_limits
+
+from lexnlp.ml.artifact_io import atomic_pickle_dump
+from lexnlp.utils.unpickler import load_sklearn_model
 
 
 LOGGER = logging.getLogger(__name__)
@@ -31,6 +33,7 @@ LEGACY_CONTRACT_TYPE_TAG = "pipeline/contract-type/0.1"
 RUNTIME_CONTRACT_TYPE_TAG = "pipeline/contract-type/0.2-runtime"
 CONTRACT_TYPE_CORPUS_TAG = "corpus/contract-types/0.1"
 CONTRACT_TYPE_MODEL_FILENAME = "pipeline_contract_type_classifier.cloudpickle"
+CONTRACT_TYPE_TRAINING_THREADS = 1
 
 
 def ensure_tag_downloaded(tag: str) -> Path:
@@ -48,7 +51,7 @@ def ensure_tag_downloaded(tag: str) -> Path:
 def load_pipeline_for_tag(tag: str) -> Pipeline:
     path = ensure_tag_downloaded(tag)
     with path.open("rb") as model_file:
-        return load(model_file)
+        return load_sklearn_model(model_file)
 
 
 def _extract_label(member_name: str) -> str:
@@ -65,8 +68,8 @@ def collect_contract_type_samples(
     max_docs_per_label: int,
     head_character_n: int,
 ) -> Tuple[List[str], List[str], Dict[str, int]]:
-    if max_docs_per_label <= 0:
-        raise ValueError("max_docs_per_label must be > 0")
+    if max_docs_per_label < 0:
+        raise ValueError("max_docs_per_label must be >= 0")
     if head_character_n <= 0:
         raise ValueError("head_character_n must be > 0")
 
@@ -75,17 +78,16 @@ def collect_contract_type_samples(
     counts: Dict[str, int] = defaultdict(int)
 
     with tarfile.open(archive_path, mode="r:*") as archive:
-        # Sort member names for deterministic sampling across environments.
-        members: Iterable[tarfile.TarInfo] = sorted(
-            archive.getmembers(),
-            key=lambda item: item.name,
-        )
+        # The corpus release is integrity-pinned, including its member order.
+        # Preserve that canonical order because the per-label cap makes order
+        # part of the published training recipe.
+        members: Iterable[tarfile.TarInfo] = archive
         for member in members:
             if not member.isfile() or not member.name.lower().endswith(".txt"):
                 continue
 
             label = _extract_label(member.name)
-            if counts[label] >= max_docs_per_label:
+            if max_docs_per_label and counts[label] >= max_docs_per_label:
                 continue
 
             file_obj = archive.extractfile(member)
@@ -116,9 +118,12 @@ def train_contract_type_pipeline(
     labels: Sequence[str],
     *,
     random_state: int,
+    max_features: int = 75_000,
 ) -> Pipeline:
     if len(texts) != len(labels):
         raise ValueError("texts and labels length mismatch")
+    if max_features <= 0:
+        raise ValueError("max_features must be > 0")
 
     pipeline = Pipeline(
         steps=[
@@ -129,7 +134,7 @@ def train_contract_type_pipeline(
                     strip_accents="unicode",
                     ngram_range=(1, 2),
                     min_df=2,
-                    max_features=120000,
+                    max_features=max_features,
                     sublinear_tf=True,
                 ),
             ),
@@ -138,14 +143,18 @@ def train_contract_type_pipeline(
                 LogisticRegression(
                     class_weight="balanced",
                     max_iter=1000,
-                    multi_class="multinomial",
                     random_state=random_state,
                     solver="lbfgs",
                 ),
             ),
         ]
     )
-    pipeline.fit(texts, labels)
+    # BLAS reductions can differ at the last few floating-point bits when their
+    # work is scheduled across a variable number of threads.  A fixed
+    # single-thread fit makes release artifacts byte-reproducible and also
+    # prevents runtime fallback training from oversubscribing small hosts.
+    with threadpool_limits(limits=CONTRACT_TYPE_TRAINING_THREADS):
+        pipeline.fit(texts, labels)
     return pipeline
 
 
@@ -162,10 +171,18 @@ def write_pipeline_to_catalog(
     destination_path = destination_dir / CONTRACT_TYPE_MODEL_FILENAME
 
     if destination_path.exists() and not force:
-        return destination_path
+        try:
+            with destination_path.open("rb") as model_file:
+                load_sklearn_model(model_file)
+            return destination_path
+        except Exception:
+            LOGGER.warning(
+                "Existing contract-type model is invalid; replacing it: %s",
+                destination_path,
+                exc_info=True,
+            )
 
-    with destination_path.open("wb") as model_file:
-        pickle.dump(pipeline, model_file)
+    atomic_pickle_dump(pipeline, destination_path)
     return destination_path
 
 
@@ -173,30 +190,47 @@ def ensure_runtime_contract_type_model(
     *,
     target_tag: str = RUNTIME_CONTRACT_TYPE_TAG,
     force: bool = False,
-    max_docs_per_label: int = 120,
+    max_docs_per_label: int = 0,
     head_character_n: int = 4000,
     random_state: int = 7,
+    max_features: int = 75_000,
 ) -> Path:
     from lexnlp.ml.catalog import get_path_from_catalog
 
+    invalid_local_model = False
     if not force:
         try:
-            return get_path_from_catalog(target_tag)
+            existing_path = get_path_from_catalog(target_tag)
         except FileNotFoundError:
             pass
+        else:
+            try:
+                with existing_path.open("rb") as model_file:
+                    load_sklearn_model(model_file)
+                return existing_path
+            except Exception:
+                invalid_local_model = True
+                LOGGER.warning(
+                    "Existing runtime contract-type model is invalid; rebuilding it: %s",
+                    existing_path,
+                    exc_info=True,
+                )
 
         # Prefer downloading a published runtime-compatible artifact when
         # available to avoid retraining in CI environments.
-        try:
-            return ensure_tag_downloaded(target_tag)
-        except Exception as exc:
-            LOGGER.warning(
-                "Unable to download runtime contract-type model tag=%s; falling back to training. error=%s",
-                target_tag,
-                exc,
-                exc_info=True,
-            )
-            pass
+        if not invalid_local_model:
+            try:
+                downloaded_path = ensure_tag_downloaded(target_tag)
+                with downloaded_path.open("rb") as model_file:
+                    load_sklearn_model(model_file)
+                return downloaded_path
+            except Exception as exc:
+                LOGGER.warning(
+                    "Unable to load runtime contract-type model tag=%s; falling back to training. error=%s",
+                    target_tag,
+                    exc,
+                    exc_info=True,
+                )
 
     corpus_archive = ensure_tag_downloaded(CONTRACT_TYPE_CORPUS_TAG)
     texts, labels, _counts = collect_contract_type_samples(
@@ -204,7 +238,12 @@ def ensure_runtime_contract_type_model(
         max_docs_per_label=max_docs_per_label,
         head_character_n=head_character_n,
     )
-    pipeline = train_contract_type_pipeline(texts, labels, random_state=random_state)
+    pipeline = train_contract_type_pipeline(
+        texts,
+        labels,
+        random_state=random_state,
+        max_features=max_features,
+    )
     destination_path = write_pipeline_to_catalog(
         pipeline=pipeline,
         target_tag=target_tag,

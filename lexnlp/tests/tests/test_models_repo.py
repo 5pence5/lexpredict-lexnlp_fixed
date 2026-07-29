@@ -36,4 +36,3 @@ def test_get_models_repo_url_precedence_over_slug(monkeypatch) -> None:
     monkeypatch.setenv("LEXNLP_MODELS_REPO_SLUG", "foo/bar")
 
     assert get_models_repo() == "https://api.github.com/repos/a/b/releases/tags/"
-

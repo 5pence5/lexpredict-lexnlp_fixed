@@ -135,11 +135,11 @@ def ensure_tag_downloaded(tag: str) -> Path:
 
 
 def load_pipeline_for_tag(tag: str):
-    from cloudpickle import load
+    from lexnlp.utils.unpickler import load_sklearn_model
 
     model_path = ensure_tag_downloaded(tag)
     with model_path.open("rb") as model_file:
-        return load(model_file)
+        return load_sklearn_model(model_file)
 
 
 def score_pipeline(pipeline, texts: List[str], labels: List[bool], min_probability: float) -> Dict[str, float]:

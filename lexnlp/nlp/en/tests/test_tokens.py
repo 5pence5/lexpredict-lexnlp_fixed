@@ -117,6 +117,10 @@ def test_wordnet_pos():
         assert get_wordnet_pos(k) == treebank_pos_map[k]
 
 
+def test_multilingual_wordnet_data_is_available():
+    assert wordnet.synsets("chien", lang="fra")
+
+
 def test_lemmas():
     lexnlp_tests.test_extraction_func_on_test_data(get_lemma_list)
     lexnlp_tests.test_extraction_func_on_test_data(get_lemmas)

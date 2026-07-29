@@ -140,6 +140,10 @@ class TestDeDatesPlain(TestCase):
         self.assertEqual(2, len(dates))
         self.assertEqual(datetime.datetime(1972, 2, 15, 0, 0), dates[0].date)
         self.assertEqual(datetime.datetime(1972, 12, 29, 0, 0), dates[1].date)
+        self.assertEqual(
+            ['15. Februar 1972', '29. Dezember 1972'],
+            [text[slice(*annotation.coords)] for annotation in dates],
+        )
 
     def test_negative_stunden(self):
         text = '''- Definitiver Leasing-Entscheid innert 24 Stunden 5.'''

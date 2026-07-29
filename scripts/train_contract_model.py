@@ -6,20 +6,21 @@ from __future__ import annotations
 import argparse
 import copy
 import json
-import pickle
 import subprocess
 import sys
 import tarfile
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Sequence, Tuple
 
-from cloudpickle import load
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score
 from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import GaussianNB
 from sklearn.pipeline import Pipeline
+
+from lexnlp.ml.artifact_io import atomic_pickle_dump
+from lexnlp.utils.unpickler import restore_legacy_model_state
 
 
 DEFAULT_POSITIVE_TAGS: Tuple[str, ...] = (
@@ -190,23 +191,12 @@ def ensure_tag_downloaded(tag: str) -> Path:
         return get_path_from_catalog(tag)
 
 
-def patch_legacy_estimator_attributes(pipeline: Pipeline) -> None:
-    estimator = pipeline._final_estimator
-    if hasattr(estimator, "sigma_"):
-        if not hasattr(estimator, "var_"):
-            estimator.var_ = estimator.sigma_
-        if not hasattr(estimator, "variance_"):
-            estimator.variance_ = estimator.var_
-
-    for _, _, transform in pipeline._iter(with_final=False):
-        transform.clip = hasattr(transform, "clip") and transform.clip
-
-
 def load_pipeline_for_tag(tag: str) -> Tuple[Path, Pipeline]:
+    from lexnlp.utils.unpickler import load_sklearn_model
+
     path = ensure_tag_downloaded(tag)
     with path.open("rb") as model_file:
-        pipeline = load(model_file)
-    patch_legacy_estimator_attributes(pipeline)
+        pipeline = load_sklearn_model(model_file)
     return path, pipeline
 
 
@@ -332,8 +322,7 @@ def write_candidate_to_catalog(
             f"Candidate path already exists: {destination_path}. Pass --force to overwrite."
         )
 
-    with destination_path.open("wb") as candidate_file:
-        pickle.dump(pipeline, candidate_file)
+    atomic_pickle_dump(pipeline, destination_path)
     return destination_path
 
 
@@ -373,6 +362,13 @@ def run_quality_gate(
 
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
+
+    from lexnlp.ml.artifact_abi import (
+        artifact_metadata,
+        assert_model_artifact_runtime,
+    )
+
+    assert_model_artifact_runtime()
 
     baseline_model_path, baseline_pipeline = load_pipeline_for_tag(args.baseline_tag)
     feature_steps = baseline_pipeline.steps[:-1]
@@ -414,7 +410,7 @@ def main(argv: Sequence[str]) -> int:
             max_workers=args.max_workers,
         )
         candidate.fit(X_train, y_train)
-        patch_legacy_estimator_attributes(candidate)
+        restore_legacy_model_state(candidate)
         estimator_scores[estimator_name] = score_pipeline(
             candidate,
             X_val,
@@ -433,7 +429,7 @@ def main(argv: Sequence[str]) -> int:
         max_workers=args.max_workers,
     )
     selected_pipeline.fit(texts, labels)
-    patch_legacy_estimator_attributes(selected_pipeline)
+    restore_legacy_model_state(selected_pipeline)
 
     candidate_model_path = write_candidate_to_catalog(
         baseline_model_path=baseline_model_path,
@@ -447,6 +443,7 @@ def main(argv: Sequence[str]) -> int:
         "candidate_tag": args.candidate_tag,
         "baseline_model_path": str(baseline_model_path),
         "candidate_model_path": str(candidate_model_path),
+        **artifact_metadata(candidate_model_path),
         "selected_estimator": selected_estimator,
         "estimators": estimator_scores,
         "dataset": {

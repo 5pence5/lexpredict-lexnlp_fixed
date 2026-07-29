@@ -24,12 +24,12 @@ from typing import Generator, List, Optional, Tuple, Any, Union
 # Packages
 import pandas
 import regex as re
-import joblib
 
 # Project imports
 from lexnlp.nlp.en.segments.utils import build_document_line_distribution
 from lexnlp.utils.map import Map
 from lexnlp.utils.decorators import safe_failure
+from lexnlp.utils.unpickler import load_joblib_model
 from lexnlp.nlp.en.segments.heading_heuristics import HeadingHeuristics
 
 
@@ -40,7 +40,9 @@ MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 
 class SectionSegmenterModel:
-    SECTION_SEGMENTER_MODEL = joblib.load(os.path.join(MODULE_PATH, "./section_segmenter.pickle"))
+    SECTION_SEGMENTER_MODEL = load_joblib_model(
+        os.path.join(MODULE_PATH, "./section_segmenter.pickle")
+    )
     FEATURE_NAMES = []
 
 

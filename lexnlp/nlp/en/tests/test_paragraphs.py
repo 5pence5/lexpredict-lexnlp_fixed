@@ -12,9 +12,11 @@ __email__ = "support@contraxsuite.com"
 import os
 import string
 from unittest import TestCase
+from unittest.mock import patch
 
 # Project imports
 from lexnlp.extract.common.base_path import lexnlp_test_path
+from lexnlp.nlp.en.segments import paragraphs
 from lexnlp.nlp.en.segments.paragraphs import get_paragraph_list, get_paragraph_span_list, splitlines_with_spans
 from lexnlp.nlp.en.segments.utils import build_document_distribution
 from lexnlp.tests import lexnlp_tests
@@ -72,6 +74,7 @@ class TestParagraphs(TestCase):
 
     def test_splitlines_with_spans(self):
         data = [
+            ('single line', ['single line'], [(0, 11)]),
             ('1\n1', ['1', '1'], [(0, 2), (2, 3)]),
             ('2\r2', ['2', '2'], [(0, 2), (2, 3)]),
             ('3\n\r3', ['3', '3'], [(0, 3), (3, 4)]),
@@ -88,6 +91,18 @@ class TestParagraphs(TestCase):
             assert actual_spans == expected_spans, (
                 "Actual spans do not match the expected spans for text:\n{0}".format(text)
             )
+
+    def test_single_line_paragraph_span_starts_at_zero(self):
+        text = '2021-01-20T10:32:31.938706'
+
+        # Force the classifier down the break-at-first-line path which used to
+        # expose a (-1, len(text)) span for single-line documents.
+        with patch.object(
+            paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+            'predict_proba',
+            return_value=[[0.0, 1.0]],
+        ):
+            self.assertEqual([(0, len(text), text)], get_paragraph_span_list(text))
 
     def test_document_distribution_1_lc(self):
         """

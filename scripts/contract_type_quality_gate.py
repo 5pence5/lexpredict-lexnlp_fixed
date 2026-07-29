@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import hashlib
 import json
 import os
 import sys
@@ -67,17 +68,15 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         help="Maximum allowed candidate top-1 accuracy drop vs baseline.",
     )
     parser.add_argument(
+        "--max-accuracy-topn-regression",
         "--max-accuracy-top3-regression",
         type=float,
         dest="max_accuracy_topn_regression",
-        default=None,
-        help="Deprecated alias for --max-accuracy-topn-regression (when --top-n=3).",
-    )
-    parser.add_argument(
-        "--max-accuracy-topn-regression",
-        type=float,
         default=0.0,
-        help="Maximum allowed candidate top-N accuracy drop vs baseline.",
+        help=(
+            "Maximum allowed candidate top-N accuracy drop vs baseline. "
+            "--max-accuracy-top3-regression is a deprecated alias."
+        ),
     )
     parser.add_argument(
         "--max-f1-macro-regression",
@@ -137,6 +136,15 @@ def load_fixture(path: Path) -> Tuple[List[str], List[str]]:
     return texts, labels
 
 
+def verify_fixture_sha256(path: Path, expected_sha256: str) -> None:
+    digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    if digest != expected_sha256:
+        raise ValueError(
+            "Fixture SHA-256 mismatch between --fixture and "
+            f"--baseline-metrics-json: {digest} != {expected_sha256}"
+        )
+
+
 def ensure_tag_downloaded(tag: str) -> Path:
     from lexnlp.ml.catalog import get_path_from_catalog
     from lexnlp.ml.catalog.download import download_github_release
@@ -149,11 +157,11 @@ def ensure_tag_downloaded(tag: str) -> Path:
 
 
 def load_pipeline_for_tag(tag: str):
-    from cloudpickle import load
+    from lexnlp.utils.unpickler import load_sklearn_model
 
     model_path = ensure_tag_downloaded(tag)
     with model_path.open("rb") as model_file:
-        return load(model_file)
+        return load_sklearn_model(model_file)
 
 
 def score_pipeline(pipeline, texts: List[str], labels: List[str], *, top_n: int) -> Dict[str, float]:
@@ -225,6 +233,7 @@ def load_baseline_metrics(path: Path) -> Dict[str, Any]:
         "metrics": metrics,
         "baseline_tag": payload.get("baseline_tag"),
         "fixture": payload.get("fixture"),
+        "fixture_sha256": payload.get("fixture_sha256"),
         "top_n": payload.get("top_n"),
         "raw": payload,
     }
@@ -262,6 +271,13 @@ def main(argv: Sequence[str]) -> int:
                     "Fixture mismatch between --fixture and --baseline-metrics-json: "
                     f"{expected_fixture!r} != {file_fixture!r}"
                 )
+
+        fixture_sha256 = baseline_metrics_file.get("fixture_sha256")
+        if not fixture_sha256:
+            raise ValueError(
+                "Baseline metrics JSON must declare fixture_sha256"
+            )
+        verify_fixture_sha256(args.fixture, fixture_sha256)
 
         file_top_n = baseline_metrics_file.get("top_n")
         if file_top_n is not None and int(file_top_n) != int(args.top_n):
@@ -332,8 +348,12 @@ def main(argv: Sequence[str]) -> int:
 
     if args.write_baseline_metrics_json:
         baseline_payload = {
+            "schema_version": 2,
             "baseline_tag": args.baseline_tag,
             "fixture": str(args.fixture),
+            "fixture_sha256": hashlib.sha256(
+                args.fixture.read_bytes()
+            ).hexdigest(),
             "top_n": int(args.top_n),
             "metrics": baseline_metrics,
         }

@@ -24,6 +24,68 @@ from lexnlp import is_stanford_enabled
 from lexnlp.tests import lexnlp_tests
 
 
+class RecordingTagger:
+    def __init__(self, labels):
+        self.labels = labels
+        self.calls = []
+
+    def tag(self, tokens):
+        tokens = list(tokens)
+        self.calls.append(tokens)
+        return [(token, self.labels.get(token, "O")) for token in tokens]
+
+
+def test_stanford_ner_tags_each_sentence_once(monkeypatch):
+    from lexnlp.extract.en.entities import stanford_ner
+
+    sentences = [
+        "Alice joined Acme.",
+        "Bob moved to London.",
+    ]
+    tagger = RecordingTagger(
+        {
+            "Alice": "PERSON",
+            "Acme": "ORGANIZATION",
+            "Bob": "PERSON",
+            "London": "LOCATION",
+        }
+    )
+    monkeypatch.setattr(stanford_ner, "STANFORD_NER_TAGGER", tagger)
+    monkeypatch.setattr(stanford_ner, "get_sentence_list", lambda _text: iter(sentences))
+    monkeypatch.setattr(
+        stanford_ner,
+        "get_tokens_list",
+        lambda sentence: sentence.rstrip(".").split(),
+    )
+
+    assert list(stanford_ner.get_persons("ignored", return_source=True)) == [
+        ("Alice", sentences[0]),
+        ("Bob", sentences[1]),
+    ]
+    assert tagger.calls == [
+        ["Alice", "joined", "Acme"],
+        ["Bob", "moved", "to", "London"],
+    ]
+
+    tagger.calls.clear()
+    assert list(stanford_ner.get_organizations("ignored", return_source=True)) == [
+        ("Acme", sentences[0]),
+    ]
+    assert tagger.calls == [
+        ["Alice", "joined", "Acme"],
+        ["Bob", "moved", "to", "London"],
+    ]
+
+    tagger.calls.clear()
+    assert list(stanford_ner.get_locations("ignored", return_source=True)) == [
+        ("London", sentences[1]),
+    ]
+    assert tagger.calls == [
+        ["Alice", "joined", "Acme"],
+        ["Bob", "moved", "to", "London"],
+    ]
+
+
 @pytest.mark.skipif(not is_stanford_enabled(), reason="Stanford is disabled.")  # skip-audit: issue=https://github.com/LexPredict/lexpredict-lexnlp/pull/80 expires=2030-01-01
 def test_stanford_name_example_in():
     from lexnlp.extract.en.entities.stanford_ner import get_persons

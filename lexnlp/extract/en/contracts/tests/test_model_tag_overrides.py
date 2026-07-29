@@ -7,6 +7,7 @@ from lexnlp.extract.en.contracts.predictors import (
 from lexnlp.extract.en.contracts import runtime_model
 from lexnlp.ml import catalog as ml_catalog
 from lexnlp.ml.predictor import ProbabilityPredictor
+from lexnlp.utils import unpickler
 
 
 def test_is_contract_default_pipeline_tag_no_env(monkeypatch):
@@ -44,13 +45,11 @@ def test_is_contract_default_pipeline_falls_back_to_legacy(monkeypatch, tmp_path
 
     monkeypatch.setattr(ml_catalog, "get_path_from_catalog", get_path)
 
-    import cloudpickle
-
     def fake_load(_file_obj):
         calls["load"] += 1
         return sentinel_pipeline
 
-    monkeypatch.setattr(cloudpickle, "load", fake_load)
+    monkeypatch.setattr(unpickler, "load_sklearn_model", fake_load)
 
     result = ProbabilityPredictorIsContract.get_default_pipeline()
     assert result is sentinel_pipeline
