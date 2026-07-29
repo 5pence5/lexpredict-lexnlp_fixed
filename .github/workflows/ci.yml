@@ -105,6 +105,8 @@ jobs:
           uv pip check
           uv run --frozen --python "${PYTHON_VERSION}" python -c \
             "import gensim, lxml.etree, numpy, pandas, regex, scipy, sklearn; import lexnlp; print(lexnlp.__version__)"
+          uv run --frozen --python "${PYTHON_VERSION}" python -c \
+            "from pathlib import PureWindowsPath; from lexnlp.ml.catalog import _catalog_tag; root = PureWindowsPath('C:/nltk_data/lexpredict-lexnlp'); asset = root / 'pipeline/is-contract/0.2/model.cloudpickle'; assert _catalog_tag(asset, root) == 'pipeline/is-contract/0.2'"
           uv build --python "${PYTHON_VERSION}"
         shell: bash
 

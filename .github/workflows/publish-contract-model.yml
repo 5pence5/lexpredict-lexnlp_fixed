@@ -73,6 +73,9 @@ jobs:
               print(f"{package}=={version(package)}")
           PY
 
+      - name: Bootstrap pinned NLTK resources
+        run: .venv-artifact/bin/python scripts/bootstrap_assets.py --nltk
+
       - name: Re-export contract model with minimum artifact ABI
         env:
           GITHUB_TOKEN: ${{ github.token }}
