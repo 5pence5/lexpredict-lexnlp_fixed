@@ -231,7 +231,7 @@ class GitHubReleaseDownloader:
         tag: str,
         *,
         manifest_path: Optional[Union[Path, str]] = None,
-    ) -> None:
+    ) -> Path:
         manifest = load_asset_manifest(manifest_path)
         models_repo = _require_matching_repository(manifest)
         trusted = manifest.get(tag)
@@ -239,7 +239,7 @@ class GitHubReleaseDownloader:
         response.raise_for_status()
         asset = cls.get_asset(response, filename=trusted.filename)
         destination_directory = CATALOG / tag
-        cls.download_asset(
+        return cls.download_asset(
             asset,
             destination_directory,
             trusted=trusted,
@@ -332,7 +332,7 @@ class GitHubReleaseDownloader:
         trusted: Optional[TrustedAsset] = None,
         expected_host: Optional[str] = None,
         chunk_size: int = 8192,
-    ) -> None:
+    ) -> Path:
         """Download, bound, verify, and atomically install one trusted asset."""
 
         name = asset.get("name")
@@ -377,7 +377,7 @@ class GitHubReleaseDownloader:
             try:
                 _verify_file(destination, trusted)
                 LOGGER.info("Using verified existing asset %s", destination)
-                return
+                return destination
             except ChecksumError:
                 LOGGER.warning("Replacing unverified existing asset %s", destination)
 
@@ -419,6 +419,7 @@ class GitHubReleaseDownloader:
 
         invalidate_catalog_cache()
         LOGGER.info("Downloaded and verified %s to %s", trusted.tag, destination)
+        return destination
 
 
 def download_github_release(
@@ -426,7 +427,7 @@ def download_github_release(
     prompt_user: bool = True,
     *,
     manifest_path: Optional[Union[Path, str]] = None,
-) -> None:
+) -> Optional[Path]:
     """Download a release tag after manifest-backed SHA-256 verification."""
 
     manifest = load_asset_manifest(manifest_path)
@@ -440,11 +441,11 @@ def download_github_release(
         ).strip().lower()
         if answer == "n":
             LOGGER.info("Not downloading %s", tag)
-            return
+            return None
         if answer not in ("", "y"):
             raise ValueError("User input must be 'Y' or 'n'.")
 
-    GitHubReleaseDownloader.download_release(tag, manifest_path=manifest_path)
+    return GitHubReleaseDownloader.download_release(tag, manifest_path=manifest_path)
 
 
 def _bytes_to_human_readable(number_of_bytes: int) -> str:
