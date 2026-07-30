@@ -37,10 +37,20 @@ def get_models_repo() -> str:
     if slug:
         return f"https://api.github.com/repos/{slug}/releases/tags/"
 
+    # ``MODELS_REPO`` was historically a mutable module-level setting.  Keep
+    # assignments made by existing integrations effective when no environment
+    # override is configured.  Environment configuration remains preferred so
+    # it can be changed after import without mutating Python module state.
+    legacy_value = str(globals().get("MODELS_REPO", "") or "").strip()
+    imported_value = str(globals().get("_IMPORTED_MODELS_REPO", "") or "").strip()
+    if legacy_value and legacy_value != imported_value:
+        return legacy_value if legacy_value.endswith("/") else f"{legacy_value}/"
+
     return DEFAULT_MODELS_REPO
 
 
 MODELS_REPO: str = get_models_repo()
+_IMPORTED_MODELS_REPO: str = MODELS_REPO
 
 
 def get_module_path():

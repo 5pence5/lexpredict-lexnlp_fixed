@@ -253,7 +253,7 @@ def test_contract_model_bootstrap_falls_back_only_for_missing_default_tag(
     assert reexports == [
         {
             "source_tag": "pipeline/is-contract/0.1",
-            "target_tag": "pipeline/is-contract/0.2",
+            "target_tag": "_local-candidates/pipeline/is-contract/0.2",
         }
     ]
 
@@ -291,21 +291,29 @@ def test_contract_model_bootstrap_propagates_reexport_failure(monkeypatch):
     ]
 
 
+@pytest.mark.parametrize(
+    "failure",
+    (
+        catalog_download.AssetTrustError("repository mismatch"),
+        catalog_download.ChecksumError("checksum mismatch"),
+    ),
+)
 def test_contract_model_bootstrap_does_not_mask_other_trust_failures(
     monkeypatch,
+    failure,
 ):
     calls = []
 
     def fake_download(tag, *, prompt_user):
         assert prompt_user is False
         calls.append(tag)
-        raise catalog_download.AssetTrustError("repository mismatch")
+        raise failure
 
     monkeypatch.delenv("LEXNLP_CONTRACT_MODEL_TAG", raising=False)
     monkeypatch.delenv("LEXNLP_IS_CONTRACT_MODEL_TAG", raising=False)
     monkeypatch.setattr(catalog_download, "download_github_release", fake_download)
 
-    with pytest.raises(catalog_download.AssetTrustError, match="repository mismatch"):
+    with pytest.raises(type(failure), match="mismatch"):
         bootstrap_assets.bootstrap_contract_model(
             dry_run=False,
             tag="pipeline/is-contract/0.2",

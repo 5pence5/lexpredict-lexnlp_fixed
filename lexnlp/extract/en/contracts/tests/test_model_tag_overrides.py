@@ -56,6 +56,31 @@ def test_is_contract_default_pipeline_falls_back_to_legacy(monkeypatch, tmp_path
     assert calls == {"catalog": 1, "load": 1}
 
 
+def test_is_contract_missing_models_error_has_installed_api_guidance(monkeypatch):
+    def raise_default_load_error(cls):
+        raise FileNotFoundError("missing default model")
+
+    def raise_legacy_load_error(_tag):
+        raise FileNotFoundError("missing legacy model")
+
+    monkeypatch.delenv("LEXNLP_IS_CONTRACT_MODEL_TAG", raising=False)
+    monkeypatch.setattr(
+        ProbabilityPredictor,
+        "get_default_pipeline",
+        classmethod(raise_default_load_error),
+    )
+    monkeypatch.setattr(ml_catalog, "get_path_from_catalog", raise_legacy_load_error)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        ProbabilityPredictorIsContract.get_default_pipeline()
+
+    message = str(exc_info.value)
+    assert "download_github_release" in message
+    assert "pipeline/is-contract/0.1" in message
+    assert "scripts/bootstrap_assets.py --contract-model" in message
+    assert isinstance(exc_info.value.__cause__, FileNotFoundError)
+
+
 def test_is_contract_env_override_failure_does_not_trigger_legacy_fallback(monkeypatch):
     def raise_override_load_error(cls):
         raise ValueError("missing override model")
@@ -111,6 +136,35 @@ def test_contract_type_default_pipeline_falls_back_to_runtime_model(monkeypatch)
     result = ProbabilityPredictorContractType.get_default_pipeline()
     assert result is sentinel_pipeline
     assert calls == {"ensure": 1, "load": 1}
+
+
+def test_contract_type_missing_models_error_has_installed_api_guidance(monkeypatch):
+    def raise_legacy_load_error(cls):
+        raise TypeError("legacy model pickle is incompatible")
+
+    def raise_runtime_load_error(_tag):
+        raise ValueError("runtime model is incompatible")
+
+    monkeypatch.delenv("LEXNLP_CONTRACT_TYPE_MODEL_TAG", raising=False)
+    monkeypatch.setattr(
+        ProbabilityPredictor,
+        "get_default_pipeline",
+        classmethod(raise_legacy_load_error),
+    )
+    monkeypatch.setattr(
+        runtime_model,
+        "ensure_runtime_contract_type_model",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(runtime_model, "load_pipeline_for_tag", raise_runtime_load_error)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        ProbabilityPredictorContractType.get_default_pipeline()
+
+    message = str(exc_info.value)
+    assert "ensure_runtime_contract_type_model(force=True)" in message
+    assert "scripts/bootstrap_assets.py --contract-type-model" in message
+    assert isinstance(exc_info.value.__cause__, ValueError)
 
 
 def test_contract_type_env_override_failure_does_not_trigger_runtime_fallback(monkeypatch):

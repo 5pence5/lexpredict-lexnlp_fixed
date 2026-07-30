@@ -73,15 +73,17 @@ def iter_assets(payload: Dict[str, Any]) -> Iterable[Dict[str, Any]]:
         yield item
 
 
-def ensure_tag_downloaded(tag: str) -> Path:
-    from lexnlp.ml.catalog import get_path_from_catalog
-    from lexnlp.ml.catalog.download import download_github_release
+def ensure_tag_downloaded(tag: str, *, manifest_path: Path) -> Path:
+    from lexnlp.ml.catalog import get_exact_path_from_catalog
+    from lexnlp.ml.catalog.download import download_github_release_to_path
 
     try:
-        return get_path_from_catalog(tag)
+        return get_exact_path_from_catalog(tag)
     except FileNotFoundError:
-        download_github_release(tag, prompt_user=False)
-        return get_path_from_catalog(tag)
+        return download_github_release_to_path(
+            tag,
+            manifest_path=manifest_path,
+        )
 
 
 def main(argv: Sequence[str]) -> int:
@@ -97,16 +99,22 @@ def main(argv: Sequence[str]) -> int:
         expected_size = asset.get("size")
 
         try:
-            from lexnlp.ml.catalog import get_path_from_catalog
-            from lexnlp.ml.catalog.download import download_github_release
+            from lexnlp.ml.catalog import get_exact_path_from_catalog
+            from lexnlp.ml.catalog.download import download_github_release_to_path
 
             if args.force_download:
-                download_github_release(tag, prompt_user=False)
-                path = get_path_from_catalog(tag)
+                path = download_github_release_to_path(
+                    tag,
+                    manifest_path=args.manifest,
+                    force=True,
+                )
             elif args.download_missing:
-                path = ensure_tag_downloaded(tag)
+                path = ensure_tag_downloaded(
+                    tag,
+                    manifest_path=args.manifest,
+                )
             else:
-                path = get_path_from_catalog(tag)
+                path = get_exact_path_from_catalog(tag)
         except Exception as exc:
             failures.append(f"{tag}: missing/unreadable ({exc})")
             continue

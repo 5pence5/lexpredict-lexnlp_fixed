@@ -10,13 +10,25 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 
 DEFAULT_FIXTURE = Path(
     "test_data/lexnlp/extract/en/contracts/tests/test_contracts/test_contract_type.csv"
 )
 REQUIRED_METRIC_KEYS = ("accuracy_top1", "accuracy_topn", "f1_macro", "f1_weighted")
+HOLDOUT_SPLIT_IDENTITY_KEYS = (
+    "strategy",
+    "normalization",
+    "split_sha256",
+    "ambiguous_cross_label_groups_excluded",
+    "ambiguous_cross_label_samples_excluded",
+    "train_samples",
+    "test_samples",
+    "evaluated_labels",
+    "train_only_labels_with_fewer_than_five_groups",
+    "normalized_group_overlap",
+)
 
 
 def resolve_contract_type_model_tag() -> str:
@@ -48,6 +60,14 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--candidate-tag",
         required=True,
         help="Catalog tag used as candidate model.",
+    )
+    parser.add_argument(
+        "--candidate-training-report-json",
+        type=Path,
+        help=(
+            "Optional training report for enforcing the duplicate-group holdout. "
+            "Requires --baseline-metrics-json with duplicate_group_holdout evidence."
+        ),
     )
     parser.add_argument(
         "--fixture",
@@ -89,6 +109,32 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         type=float,
         default=0.0,
         help="Maximum allowed candidate weighted-F1 drop vs baseline.",
+    )
+    parser.add_argument(
+        "--max-holdout-accuracy-top1-regression",
+        type=float,
+        default=0.0,
+        help="Maximum allowed candidate holdout top-1 accuracy drop vs baseline.",
+    )
+    parser.add_argument(
+        "--max-holdout-accuracy-topn-regression",
+        "--max-holdout-accuracy-top3-regression",
+        type=float,
+        dest="max_holdout_accuracy_topn_regression",
+        default=0.0,
+        help="Maximum allowed candidate holdout top-N accuracy drop vs baseline.",
+    )
+    parser.add_argument(
+        "--max-holdout-f1-macro-regression",
+        type=float,
+        default=0.0,
+        help="Maximum allowed candidate holdout macro-F1 drop vs baseline.",
+    )
+    parser.add_argument(
+        "--max-holdout-f1-weighted-regression",
+        type=float,
+        default=0.0,
+        help="Maximum allowed candidate holdout weighted-F1 drop vs baseline.",
     )
     parser.add_argument(
         "--min-candidate-accuracy-top1",
@@ -212,13 +258,18 @@ def parse_metrics(raw: Dict[str, Any], source: str) -> Dict[str, float]:
     return {key: float(raw[key]) for key in REQUIRED_METRIC_KEYS}
 
 
-def load_baseline_metrics(path: Path) -> Dict[str, Any]:
+def load_json_object(path: Path, *, description: str) -> Dict[str, Any]:
     if not path.exists():
-        raise FileNotFoundError(f"Baseline metrics file not found: {path}")
+        raise FileNotFoundError(f"{description} not found: {path}")
 
     payload = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError("Baseline metrics JSON must be an object")
+        raise ValueError(f"{description} JSON must be an object")
+    return payload
+
+
+def load_baseline_metrics(path: Path) -> Dict[str, Any]:
+    payload = load_json_object(path, description="Baseline metrics file")
 
     if "metrics" in payload:
         metrics = parse_metrics(payload["metrics"], f"{path}::metrics")
@@ -237,6 +288,145 @@ def load_baseline_metrics(path: Path) -> Dict[str, Any]:
         "top_n": payload.get("top_n"),
         "raw": payload,
     }
+
+
+def require_mapping(
+    payload: Mapping[str, Any],
+    key: str,
+    *,
+    source: str,
+) -> Mapping[str, Any]:
+    value = payload.get(key)
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{source} must contain object evidence at {key!r}")
+    return value
+
+
+def require_evidence_value(
+    payload: Mapping[str, Any],
+    key: str,
+    *,
+    source: str,
+) -> Any:
+    if key not in payload or payload[key] is None or payload[key] == "":
+        raise ValueError(f"{source} is missing required evidence {key!r}")
+    return payload[key]
+
+
+def evaluate_duplicate_group_holdout(
+    *,
+    baseline_payload: Mapping[str, Any],
+    candidate_report: Mapping[str, Any],
+    candidate_tag: str,
+    max_accuracy_top1_regression: float = 0.0,
+    max_accuracy_topn_regression: float = 0.0,
+    max_f1_macro_regression: float = 0.0,
+    max_f1_weighted_regression: float = 0.0,
+) -> Dict[str, Any]:
+    """Validate and compare deterministic duplicate-group holdout evidence."""
+    baseline_source = "baseline metrics::duplicate_group_holdout"
+    candidate_source = "candidate training report"
+    baseline_holdout = require_mapping(
+        baseline_payload,
+        "duplicate_group_holdout",
+        source="Baseline metrics",
+    )
+    candidate_split = require_mapping(
+        candidate_report,
+        "validation_split",
+        source=candidate_source,
+    )
+    baseline_metrics = parse_metrics(
+        dict(require_mapping(baseline_holdout, "metrics", source=baseline_source)),
+        f"{baseline_source}::metrics",
+    )
+    candidate_metrics = parse_metrics(
+        dict(
+            require_mapping(
+                candidate_report,
+                "validation_metrics",
+                source=candidate_source,
+            )
+        ),
+        f"{candidate_source}::validation_metrics",
+    )
+
+    baseline_recipe = require_evidence_value(
+        baseline_payload,
+        "training_recipe",
+        source="Baseline metrics",
+    )
+    candidate_recipe = require_evidence_value(
+        candidate_report,
+        "training_recipe",
+        source=candidate_source,
+    )
+    reported_candidate_tag = require_evidence_value(
+        candidate_report,
+        "target_tag",
+        source=candidate_source,
+    )
+
+    result: Dict[str, Any] = {
+        "baseline": baseline_metrics,
+        "candidate": candidate_metrics,
+        "checks": [],
+        "passed": True,
+    }
+
+    def require_equal(evidence: str, baseline_value: Any, candidate_value: Any) -> None:
+        passed = candidate_value == baseline_value
+        result["checks"].append(
+            {
+                "scope": "holdout-evidence",
+                "evidence": evidence,
+                "baseline": baseline_value,
+                "candidate": candidate_value,
+                "passed": passed,
+            }
+        )
+        result["passed"] = bool(result["passed"] and passed)
+
+    require_equal("target_tag", candidate_tag, reported_candidate_tag)
+    require_equal("training_recipe", baseline_recipe, candidate_recipe)
+    for key in HOLDOUT_SPLIT_IDENTITY_KEYS:
+        baseline_value = require_evidence_value(
+            baseline_holdout,
+            key,
+            source=baseline_source,
+        )
+        candidate_value = require_evidence_value(
+            candidate_split,
+            key,
+            source=f"{candidate_source}::validation_split",
+        )
+        require_equal(f"validation_split.{key}", baseline_value, candidate_value)
+
+    max_regressions = {
+        "accuracy_top1": max_accuracy_top1_regression,
+        "accuracy_topn": max_accuracy_topn_regression,
+        "f1_macro": max_f1_macro_regression,
+        "f1_weighted": max_f1_weighted_regression,
+    }
+    for metric_key, max_regression in max_regressions.items():
+        baseline_value = float(baseline_metrics[metric_key])
+        candidate_value = float(candidate_metrics[metric_key])
+        delta = candidate_value - baseline_value
+        passed = delta >= -max_regression
+        result["checks"].append(
+            {
+                "scope": "holdout-metric",
+                "metric": metric_key,
+                "baseline": baseline_value,
+                "candidate": candidate_value,
+                "delta": delta,
+                "max_regression": max_regression,
+                "passed": passed,
+            }
+        )
+        result["passed"] = bool(result["passed"] and passed)
+
+    return result
 
 
 def main(argv: Sequence[str]) -> int:
@@ -345,6 +535,34 @@ def main(argv: Sequence[str]) -> int:
             }
         )
         result["passed"] = False
+
+    if args.candidate_training_report_json:
+        if baseline_metrics_file is None:
+            raise ValueError(
+                "--candidate-training-report-json requires "
+                "--baseline-metrics-json"
+            )
+        candidate_training_report = load_json_object(
+            args.candidate_training_report_json,
+            description="Candidate training report",
+        )
+        holdout_result = evaluate_duplicate_group_holdout(
+            baseline_payload=baseline_metrics_file["raw"],
+            candidate_report=candidate_training_report,
+            candidate_tag=args.candidate_tag,
+            max_accuracy_top1_regression=(
+                args.max_holdout_accuracy_top1_regression
+            ),
+            max_accuracy_topn_regression=(
+                args.max_holdout_accuracy_topn_regression
+            ),
+            max_f1_macro_regression=args.max_holdout_f1_macro_regression,
+            max_f1_weighted_regression=(
+                args.max_holdout_f1_weighted_regression
+            ),
+        )
+        result["duplicate_group_holdout"] = holdout_result
+        result["passed"] = bool(result["passed"] and holdout_result["passed"])
 
     if args.write_baseline_metrics_json:
         baseline_payload = {

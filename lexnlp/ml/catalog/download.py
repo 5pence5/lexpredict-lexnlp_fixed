@@ -10,14 +10,14 @@ from base64 import b64encode
 from dataclasses import dataclass
 from importlib.resources import files
 from math import floor, log, pow
-from pathlib import Path, PurePosixPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any, Dict, Iterator, Mapping, Optional, Union
 from urllib.parse import urlparse
 
 from requests import Response, get
 from tqdm import tqdm
 
-from lexnlp import get_models_repo
+from lexnlp import DEFAULT_MODELS_REPO, get_models_repo
 from lexnlp.ml.artifact_io import atomic_output_path
 from lexnlp.ml.catalog import CATALOG, invalidate_catalog_cache
 
@@ -27,6 +27,12 @@ LOGGER: logging.Logger = logging.getLogger(__name__)
 DEFAULT_GITHUB_TIMEOUT_SECONDS = 60.0
 DEFAULT_MANIFEST_RESOURCE = "release_asset_manifest.json"
 ASSET_MANIFEST_ENV_VAR = "LEXNLP_ASSET_MANIFEST"
+
+# Historical integrations imported or assigned this name directly on
+# ``lexnlp.ml.catalog.download``.  Environment configuration is preferred at
+# call time, but the compatibility alias remains effective when no override is
+# configured.
+MODELS_REPO: str = DEFAULT_MODELS_REPO
 
 
 class AssetTrustError(RuntimeError):
@@ -94,6 +100,53 @@ def _normalise_repo_url(url: str) -> str:
     return url.rstrip("/") + "/"
 
 
+def _configured_models_repo() -> str:
+    """Resolve the repository while retaining legacy assignment semantics."""
+    if (os.getenv("LEXNLP_MODELS_REPO") or "").strip() or (
+        os.getenv("LEXNLP_MODELS_REPO_SLUG") or ""
+    ).strip():
+        return get_models_repo()
+
+    legacy_value = str(MODELS_REPO or "").strip()
+    if legacy_value and legacy_value != DEFAULT_MODELS_REPO:
+        return legacy_value if legacy_value.endswith("/") else f"{legacy_value}/"
+    return get_models_repo()
+
+
+def _validate_catalog_tag(tag: str) -> PurePosixPath:
+    """Validate a release tag as a portable relative catalog path."""
+    tag_path = PurePosixPath(tag)
+    windows_path = PureWindowsPath(tag)
+    if (
+        not tag
+        or "\\" in tag
+        or tag_path.is_absolute()
+        or windows_path.is_absolute()
+        or bool(windows_path.drive)
+        or bool(windows_path.root)
+        or tag_path.as_posix() != tag
+        or any(part in ("", ".", "..") for part in tag.split("/"))
+    ):
+        raise AssetTrustError("Manifest tags must be safe relative catalog paths")
+    return tag_path
+
+
+def _catalog_destination_directory(tag: str) -> Path:
+    """Resolve a tag beneath CATALOG, rejecting traversal through symlinks."""
+    tag_path = _validate_catalog_tag(tag)
+    catalog_root = Path(CATALOG).resolve()
+    destination = (catalog_root / Path(*tag_path.parts)).resolve()
+    try:
+        destination.relative_to(catalog_root)
+    except ValueError as error:
+        raise AssetTrustError(
+            f"Release tag escapes the local catalog directory: {tag!r}"
+        ) from error
+    if destination == catalog_root:
+        raise AssetTrustError("Release tag must name a directory beneath the catalog")
+    return destination
+
+
 def _manifest_source(path: Optional[Union[Path, str]] = None):
     configured_path = path or (os.getenv(ASSET_MANIFEST_ENV_VAR) or "").strip()
     if configured_path:
@@ -133,13 +186,7 @@ def load_asset_manifest(path: Optional[Union[Path, str]] = None) -> AssetManifes
         except (KeyError, TypeError, ValueError) as error:
             raise AssetTrustError("Malformed entry in trusted asset manifest") from error
 
-        tag_path = PurePosixPath(tag)
-        if (
-            not tag
-            or tag_path.is_absolute()
-            or any(part in ("", ".", "..") for part in tag_path.parts)
-        ):
-            raise AssetTrustError("Manifest tags must be safe relative catalog paths")
+        _validate_catalog_tag(tag)
         if not filename or filename != raw_filename or "/" in raw_filename or "\\" in raw_filename:
             raise AssetTrustError("Manifest tag and filename must be non-empty and path-free")
         if size <= 0:
@@ -172,7 +219,7 @@ def _build_github_headers(headers: Mapping[str, str]) -> Dict[str, str]:
 
 
 def _require_matching_repository(manifest: AssetManifest) -> str:
-    configured_repo = _normalise_repo_url(get_models_repo())
+    configured_repo = _normalise_repo_url(_configured_models_repo())
     if configured_repo != manifest.models_repo:
         raise AssetTrustError(
             "Configured model repository is not the repository named by the trusted "
@@ -218,6 +265,22 @@ def verify_trusted_asset_file(
             f"tag={tag!r}: received={artifact_path.name!r}, "
             f"expected={trusted.filename!r}"
         )
+    return verify_trusted_asset_payload(
+        artifact_path,
+        tag,
+        manifest_path=manifest_path,
+    )
+
+
+def verify_trusted_asset_payload(
+    path: Union[Path, str],
+    tag: str,
+    *,
+    manifest_path: Optional[Union[Path, str]] = None,
+) -> TrustedAsset:
+    """Verify artifact bytes for a tag without constraining a staging filename."""
+    artifact_path = Path(path)
+    trusted = load_asset_manifest(manifest_path).get(tag)
     _verify_file(artifact_path, trusted)
     return trusted
 
@@ -231,25 +294,39 @@ class GitHubReleaseDownloader:
         tag: str,
         *,
         manifest_path: Optional[Union[Path, str]] = None,
+    ) -> None:
+        """Legacy release downloader; successful calls return exactly ``None``."""
+        cls.download_release_to_path(tag, manifest_path=manifest_path)
+        return None
+
+    @classmethod
+    def download_release_to_path(
+        cls,
+        tag: str,
+        *,
+        manifest_path: Optional[Union[Path, str]] = None,
+        force: bool = False,
     ) -> Path:
+        """Download a verified release and return its installed file path."""
         manifest = load_asset_manifest(manifest_path)
         models_repo = _require_matching_repository(manifest)
         trusted = manifest.get(tag)
+        destination_directory = _catalog_destination_directory(tag)
         response = cls.get_tag(tag, models_repo=models_repo)
         response.raise_for_status()
         asset = cls.get_asset(response, filename=trusted.filename)
-        destination_directory = CATALOG / tag
-        return cls.download_asset(
+        return cls.download_asset_to_path(
             asset,
             destination_directory,
             trusted=trusted,
             expected_host=urlparse(models_repo).hostname,
+            force=force,
         )
 
     @staticmethod
     def get_tag(tag: str, *, models_repo: Optional[str] = None) -> Response:
         response: Response = get(
-            url=f"{models_repo or _normalise_repo_url(get_models_repo())}{tag}",
+            url=f"{models_repo or _normalise_repo_url(_configured_models_repo())}{tag}",
             headers=_build_github_headers({"Accept": "application/vnd.github.v3+json"}),
             timeout=_get_github_timeout_seconds(),
         )
@@ -332,6 +409,27 @@ class GitHubReleaseDownloader:
         trusted: Optional[TrustedAsset] = None,
         expected_host: Optional[str] = None,
         chunk_size: int = 8192,
+    ) -> None:
+        """Legacy asset downloader; successful calls return exactly ``None``."""
+        cls.download_asset_to_path(
+            asset,
+            destination_directory,
+            trusted=trusted,
+            expected_host=expected_host,
+            chunk_size=chunk_size,
+        )
+        return None
+
+    @classmethod
+    def download_asset_to_path(
+        cls,
+        asset: Mapping[str, Any],
+        destination_directory: Union[Path, str],
+        *,
+        trusted: Optional[TrustedAsset] = None,
+        expected_host: Optional[str] = None,
+        chunk_size: int = 8192,
+        force: bool = False,
     ) -> Path:
         """Download, bound, verify, and atomically install one trusted asset."""
 
@@ -360,7 +458,9 @@ class GitHubReleaseDownloader:
 
         asset_url = str(asset.get("url", ""))
         parsed_url = urlparse(asset_url)
-        trusted_host = expected_host or urlparse(_normalise_repo_url(get_models_repo())).hostname
+        trusted_host = expected_host or urlparse(
+            _normalise_repo_url(_configured_models_repo())
+        ).hostname
         if (
             parsed_url.scheme != "https"
             or not parsed_url.hostname
@@ -373,7 +473,7 @@ class GitHubReleaseDownloader:
         destination_directory = Path(destination_directory)
         destination_directory.mkdir(exist_ok=True, parents=True)
         destination = destination_directory / trusted.filename
-        if destination.exists():
+        if destination.exists() and not force:
             try:
                 _verify_file(destination, trusted)
                 LOGGER.info("Using verified existing asset %s", destination)
@@ -427,8 +527,8 @@ def download_github_release(
     prompt_user: bool = True,
     *,
     manifest_path: Optional[Union[Path, str]] = None,
-) -> Optional[Path]:
-    """Download a release tag after manifest-backed SHA-256 verification."""
+) -> None:
+    """Legacy release downloader; successful calls return exactly ``None``."""
 
     manifest = load_asset_manifest(manifest_path)
     _require_matching_repository(manifest)
@@ -445,7 +545,25 @@ def download_github_release(
         if answer not in ("", "y"):
             raise ValueError("User input must be 'Y' or 'n'.")
 
-    return GitHubReleaseDownloader.download_release(tag, manifest_path=manifest_path)
+    GitHubReleaseDownloader.download_release_to_path(
+        tag,
+        manifest_path=manifest_path,
+    )
+    return None
+
+
+def download_github_release_to_path(
+    tag: str,
+    *,
+    manifest_path: Optional[Union[Path, str]] = None,
+    force: bool = False,
+) -> Path:
+    """Download a verified release without prompting and return its local path."""
+    return GitHubReleaseDownloader.download_release_to_path(
+        tag,
+        manifest_path=manifest_path,
+        force=force,
+    )
 
 
 def _bytes_to_human_readable(number_of_bytes: int) -> str:

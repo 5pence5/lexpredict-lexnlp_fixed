@@ -38,6 +38,7 @@
   "duplicate_group_holdout": {
     "strategy": "lexnlp-global-group-holdout-v1",
     "normalization": "casefold, collapse whitespace, strip, sha256 UTF-8",
+    "split_sha256": "b66f1a09fba13756771ec4d0b935547fcd394b59d655c42963a96601569c3d21",
     "ambiguous_cross_label_groups_excluded": 20,
     "ambiguous_cross_label_samples_excluded": 40,
     "train_samples": 1882,

@@ -998,13 +998,22 @@ def reexport_contract_model_from_legacy(
 
     from lexnlp.extract.en.contracts.predictors import ProbabilityPredictorIsContract
     from lexnlp.ml.artifact_io import atomic_output_path
-    from lexnlp.ml.catalog import CATALOG, get_path_from_catalog
+    from lexnlp.ml.catalog import (
+        get_catalog_directory,
+        get_path_from_catalog,
+        invalidate_catalog_cache,
+    )
+    from lexnlp.ml.catalog.download import (
+        load_asset_manifest,
+        verify_trusted_asset_payload,
+    )
     from lexnlp.utils.unpickler import load_sklearn_model
 
     source_path = get_path_from_catalog(source_tag)
-    destination_dir = CATALOG / target_tag
+    destination_dir = get_catalog_directory(target_tag)
     destination_path = destination_dir / source_path.name
     destination_dir.mkdir(parents=True, exist_ok=True)
+    trusted_target = load_asset_manifest().assets.get(target_tag)
 
     with source_path.open("rb") as source_file:
         pipeline = load_sklearn_model(source_file)
@@ -1024,6 +1033,11 @@ def reexport_contract_model_from_legacy(
         with temporary_path.open("rb") as candidate_file:
             candidate_pipeline = load_sklearn_model(candidate_file)
         ProbabilityPredictorIsContract(pipeline=candidate_pipeline)
+        if trusted_target is not None:
+            # A manifest-pinned release tag may only receive the exact reviewed
+            # payload.  Runtime-generated candidates use a private local tag.
+            verify_trusted_asset_payload(temporary_path, target_tag)
+    invalidate_catalog_cache()
 
     LOGGER.info(
         "Generated contract model tag=%s at %s",
@@ -1040,6 +1054,7 @@ def bootstrap_contract_model(*, dry_run: bool, tag: str) -> None:
 
     try:
         from lexnlp.ml.catalog.download import (
+            AssetTrustError,
             MissingTrustedAssetError,
             download_github_release,
         )
@@ -1052,41 +1067,55 @@ def bootstrap_contract_model(*, dry_run: bool, tag: str) -> None:
     try:
         download_github_release(tag, prompt_user=False)
         return
-    except Exception as exc:
-        # The current tag may not exist yet in the configured models repo.
-        # Build that exact tag from the pinned legacy source; never switch the
-        # predictor to a different tag implicitly.
-        status_code = getattr(getattr(exc, "response", None), "status_code", None)
-        legacy_tag = "pipeline/is-contract/0.1"
-        unpublished_default = isinstance(exc, MissingTrustedAssetError)
-
-        if (
-            tag == "pipeline/is-contract/0.2"
-            and (status_code == 404 or unpublished_default)
-        ):
-            LOGGER.warning(
-                "Contract model tag=%s is not yet published in the trusted manifest; "
-                "bootstrapping legacy tag=%s and generating runtime tag=%s",
-                tag,
-                legacy_tag,
-                tag,
-            )
-
-            # Ensure the baseline tag is available locally.
-            download_github_release(legacy_tag, prompt_user=False)
-
-            try:
-                reexport_contract_model_from_legacy(
-                    source_tag=legacy_tag,
-                    target_tag=tag,
-                )
-            except Exception as generation_error:
-                raise RuntimeError(
-                    "Failed to generate required contract model "
-                    f"tag={tag!r} from legacy tag={legacy_tag!r}"
-                ) from generation_error
-            return
+    except MissingTrustedAssetError as error:
+        # A reviewed default candidate may intentionally precede publication
+        # in a custom/older manifest.  It is safe to generate only under the
+        # private local-candidate namespace.
+        failure = error
+        unpublished_default = True
+    except AssetTrustError:
+        # Manifest, repository, host, and checksum failures are trust failures,
+        # not signals to generate an unrelated local replacement.
         raise
+    except Exception as error:
+        # A 404 means the reviewed tag has not been published yet.  Other
+        # network/server failures remain visible to the caller.
+        failure = error
+        unpublished_default = False
+
+    status_code = getattr(getattr(failure, "response", None), "status_code", None)
+    legacy_tag = "pipeline/is-contract/0.1"
+
+    if (
+        tag == "pipeline/is-contract/0.2"
+        and (status_code == 404 or unpublished_default)
+    ):
+        from lexnlp.ml.catalog import get_local_candidate_tag
+
+        local_candidate_tag = get_local_candidate_tag(tag)
+        LOGGER.warning(
+            "Contract model release tag=%s is not yet published; "
+            "bootstrapping legacy tag=%s and generating private local tag=%s",
+            tag,
+            legacy_tag,
+            local_candidate_tag,
+        )
+
+        # Ensure the baseline tag is available locally.
+        download_github_release(legacy_tag, prompt_user=False)
+
+        try:
+            reexport_contract_model_from_legacy(
+                source_tag=legacy_tag,
+                target_tag=local_candidate_tag,
+            )
+        except Exception as generation_error:
+            raise RuntimeError(
+                "Failed to generate required contract model "
+                f"tag={tag!r} from legacy tag={legacy_tag!r}"
+            ) from generation_error
+        return
+    raise failure
 
 
 def bootstrap_contract_type_model(*, dry_run: bool, tag: str) -> None:

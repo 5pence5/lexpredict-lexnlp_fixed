@@ -1,4 +1,7 @@
-from scripts.train_contract_type_model import build_duplicate_group_holdout
+from scripts.train_contract_type_model import (
+    build_duplicate_group_holdout,
+    split_assignment_sha256,
+)
 
 
 def test_duplicate_group_holdout_is_deterministic_and_leak_free():
@@ -25,6 +28,9 @@ def test_duplicate_group_holdout_is_deterministic_and_leak_free():
     assert report == {
         "strategy": "lexnlp-global-group-holdout-v1",
         "normalization": "casefold, collapse whitespace, strip, sha256 UTF-8",
+        "split_sha256": (
+            "520b6df4cb604777c0b60bd46422bb76ef3cadcc2d0039622a7a2acec7ec6c92"
+        ),
         "validation_size": 0.2,
         "unique_normalized_groups": 15,
         "ambiguous_cross_label_groups_excluded": 1,
@@ -57,3 +63,29 @@ def test_duplicate_group_holdout_honors_nondefault_validation_size():
     assert len(test_indices) == 4
     assert report["validation_size"] == 0.4
     assert report["test_groups"] == 4
+
+
+def test_split_assignment_fingerprint_includes_exact_group_labels():
+    partitions = {
+        "train_groups": {"train-group"},
+        "validation_groups": {"validation-group"},
+        "excluded_ambiguous_groups": {"ambiguous-group"},
+    }
+    original = split_assignment_sha256(
+        group_labels={
+            "train-group": {"A"},
+            "validation-group": {"B"},
+            "ambiguous-group": {"A", "B"},
+        },
+        **partitions,
+    )
+    relabeled = split_assignment_sha256(
+        group_labels={
+            "train-group": {"A"},
+            "validation-group": {"B"},
+            "ambiguous-group": {"A", "C"},
+        },
+        **partitions,
+    )
+
+    assert relabeled != original

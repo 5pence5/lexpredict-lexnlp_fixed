@@ -11,7 +11,7 @@ __email__ = "support@contraxsuite.com"
 
 # standard library
 import os
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Dict, Optional
 
 # NLTK
@@ -62,6 +62,7 @@ def _resolve_catalog_dir() -> Path:
 
 
 CATALOG: Path = _resolve_catalog_dir()
+LOCAL_CANDIDATE_TAG_PREFIX = "_local-candidates"
 
 _TAG_DICT_CACHE: Optional[Dict[str, Path]] = None
 
@@ -107,14 +108,48 @@ def _get_tag_dict_cached() -> Dict[str, Path]:
     return _TAG_DICT_CACHE
 
 
-def get_path_from_catalog(tag: str) -> Path:
-    """
-    Args:
-        tag (str):
+def get_local_candidate_tag(tag: str) -> str:
+    """Return the private catalog tag used for a locally built candidate.
 
-    Returns:
-        A file path.
+    Local candidates deliberately live outside manifest-pinned release tags.
+    ``get_path_from_catalog`` aliases a missing release tag to this private tag
+    so existing predictors keep working without confusing local bytes with
+    reviewed release bytes.
     """
+    raw_tag = str(tag).strip()
+    tag_path = PurePosixPath(raw_tag)
+    windows_path = PureWindowsPath(raw_tag)
+    if (
+        not raw_tag
+        or "\\" in raw_tag
+        or tag_path.is_absolute()
+        or windows_path.is_absolute()
+        or bool(windows_path.drive)
+        or bool(windows_path.root)
+        or tag_path.as_posix() != raw_tag
+        or any(part in ("", ".", "..") for part in raw_tag.split("/"))
+    ):
+        raise ValueError(f"Unsafe catalog tag: {tag!r}")
+    return f"{LOCAL_CANDIDATE_TAG_PREFIX}/{raw_tag}"
+
+
+def get_catalog_directory(tag: str) -> Path:
+    """Return a contained catalog directory for a portable relative tag."""
+    # Reuse candidate-tag validation, then discard the private prefix it adds.
+    validated_tag = get_local_candidate_tag(tag).removeprefix(
+        f"{LOCAL_CANDIDATE_TAG_PREFIX}/"
+    )
+    root = CATALOG.resolve()
+    destination = (root / Path(*PurePosixPath(validated_tag).parts)).resolve()
+    try:
+        destination.relative_to(root)
+    except ValueError as error:
+        raise ValueError(f"Catalog tag escapes CATALOG: {tag!r}") from error
+    return destination
+
+
+def _find_exact_catalog_path(tag: str) -> Optional[Path]:
+    """Find an exact catalog tag, refreshing the cache when necessary."""
     d: Dict[str, Path] = _get_tag_dict_cached()
     path: Optional[Path] = d.get(tag)
 
@@ -129,6 +164,30 @@ def get_path_from_catalog(tag: str) -> Path:
         invalidate_catalog_cache()
         d = _get_tag_dict_cached()
         path = d.get(tag)
+    return path
+
+
+def get_exact_path_from_catalog(tag: str) -> Path:
+    """Return only a file physically stored under the requested catalog tag."""
+    path = _find_exact_catalog_path(tag)
+    if path is None:
+        raise FileNotFoundError(
+            f"Could not find exact tag={tag} in CATALOG={CATALOG}."
+        )
+    return path
+
+
+def get_path_from_catalog(tag: str) -> Path:
+    """
+    Args:
+        tag (str):
+
+    Returns:
+        A file path.
+    """
+    path = _find_exact_catalog_path(tag)
+    if path is None and not tag.startswith(f"{LOCAL_CANDIDATE_TAG_PREFIX}/"):
+        path = _find_exact_catalog_path(get_local_candidate_tag(tag))
 
     if path is None:
         raise FileNotFoundError(

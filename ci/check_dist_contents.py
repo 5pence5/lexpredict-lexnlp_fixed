@@ -13,6 +13,7 @@ from collections.abc import Iterable, Mapping
 from pathlib import Path, PurePosixPath
 
 BANNED_SUBSTRINGS = (
+    "documentation/docs/build/",
     "libs/stanford_nlp/",
     "scripts/__pycache__/",
 )

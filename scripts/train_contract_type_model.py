@@ -10,7 +10,7 @@ import re
 import sys
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple
+from typing import Collection, Dict, List, Mapping, Sequence, Tuple
 
 import numpy as np
 from sklearn.metrics import accuracy_score, f1_score
@@ -127,6 +127,58 @@ def normalized_text_group(text: str) -> str:
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
 
 
+def split_assignment_sha256(
+    *,
+    group_labels: Mapping[str, Collection[str]],
+    train_groups: Collection[str],
+    validation_groups: Collection[str],
+    excluded_ambiguous_groups: Collection[str],
+) -> str:
+    """Return a stable identity for group partitions and their exact labels."""
+    assigned_partitions: Dict[str, str] = {}
+    partitions = {
+        "train": train_groups,
+        "validation": validation_groups,
+        "excluded_ambiguous": excluded_ambiguous_groups,
+    }
+    for partition, groups in partitions.items():
+        for group_hash in groups:
+            if group_hash in assigned_partitions:
+                raise ValueError(
+                    f"Normalized group {group_hash!r} appears in multiple partitions"
+                )
+            assigned_partitions[group_hash] = partition
+
+    expected_groups = set(group_labels)
+    assigned_groups = set(assigned_partitions)
+    if assigned_groups != expected_groups:
+        raise ValueError(
+            "Split partitions must cover every normalized group exactly once: "
+            f"missing={sorted(expected_groups - assigned_groups)}, "
+            f"unknown={sorted(assigned_groups - expected_groups)}"
+        )
+
+    assignment = []
+    for group_hash in sorted(expected_groups):
+        labels = sorted(group_labels[group_hash])
+        if not labels:
+            raise ValueError(f"Normalized group {group_hash!r} has no labels")
+        assignment.append(
+            {
+                "group_sha256": group_hash,
+                "labels": labels,
+                "partition": assigned_partitions[group_hash],
+            }
+        )
+
+    serialized = json.dumps(
+        assignment,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(serialized).hexdigest()
+
+
 def build_duplicate_group_holdout(
     texts: Sequence[str],
     labels: Sequence[str],
@@ -196,9 +248,16 @@ def build_duplicate_group_holdout(
     if not train_indices or not test_indices:
         raise RuntimeError("Duplicate-group holdout produced an empty partition")
 
+    train_groups = {row_groups[index] for index in train_indices}
     report = {
         "strategy": DUPLICATE_GROUP_HOLDOUT_SEED,
         "normalization": "casefold, collapse whitespace, strip, sha256 UTF-8",
+        "split_sha256": split_assignment_sha256(
+            group_labels=group_labels,
+            train_groups=train_groups,
+            validation_groups=test_groups,
+            excluded_ambiguous_groups=ambiguous_groups,
+        ),
         "validation_size": validation_size,
         "unique_normalized_groups": len(group_indices),
         "ambiguous_cross_label_groups_excluded": len(ambiguous_groups),
@@ -207,9 +266,7 @@ def build_duplicate_group_holdout(
             for group_hash in ambiguous_groups
         ),
         "ambiguous_groups_excluded_from_evaluation_pipeline": True,
-        "train_groups": len(
-            {row_groups[index] for index in train_indices}
-        ),
+        "train_groups": len(train_groups),
         "test_groups": len(test_groups),
         "train_samples": len(train_indices),
         "test_samples": len(test_indices),
@@ -218,8 +275,7 @@ def build_duplicate_group_holdout(
             train_only_labels
         ),
         "normalized_group_overlap": len(
-            {row_groups[index] for index in train_indices}
-            & {row_groups[index] for index in test_indices}
+            train_groups & {row_groups[index] for index in test_indices}
         ),
     }
     return train_indices, test_indices, report

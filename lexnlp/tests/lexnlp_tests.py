@@ -14,7 +14,7 @@ import csv
 import inspect
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, Set, Union, List, Tuple, Any
 
 import psutil
@@ -341,7 +341,8 @@ def benchmark(benchmark_name: str, func: Callable, *args, benchmark_file: str = 
 
         text = args[0] if len(args) > 0 and isinstance(args[0], str) else 'None'
         text_size = len(text) if text else 0
-        writer.writerow((datetime.utcnow().isoformat(), benchmark_name, text_size, exec_time, max_memory_usage,
+        timestamp = datetime.now(timezone.utc).replace(tzinfo=None).isoformat()
+        writer.writerow((timestamp, benchmark_name, text_size, exec_time, max_memory_usage,
                          SYS_CPU_COUNT, SYS_CPU_FREQ, SYS_MEM_TOTAL,
                          SYS_OS_NAME, SYS_NODE_NAME, SYS_ARCH))
         print('{3}\n{4}\nText size: {0:5d}, Exec Time (s): {1:4.4f}, Max Memory (mb): {2:4.4f}\n'

@@ -70,7 +70,11 @@ class ProbabilityPredictorIsContract(ProbabilityPredictor):
             except Exception as fallback_error:
                 raise RuntimeError(
                     "Failed to load default contract model and legacy fallback model. "
-                    "Run `python scripts/bootstrap_assets.py --contract-model` and retry."
+                    "Install the trusted fallback with `from lexnlp.ml.catalog.download "
+                    "import download_github_release; download_github_release("
+                    "'pipeline/is-contract/0.1', prompt_user=False)`. "
+                    "From a source checkout, you can instead run "
+                    "`python scripts/bootstrap_assets.py --contract-model`."
                 ) from fallback_error
 
     def _sanity_check(self) -> None:
@@ -163,7 +167,12 @@ class ProbabilityPredictorContractType(ProbabilityPredictor):
             except Exception as fallback_error:
                 raise RuntimeError(
                     "Failed to load legacy contract-type model and runtime fallback model. "
-                    "Run `python scripts/bootstrap_assets.py --contract-type-model` and retry."
+                    "Install or rebuild the runtime model with `from "
+                    "lexnlp.extract.en.contracts.runtime_model import "
+                    "ensure_runtime_contract_type_model; "
+                    "ensure_runtime_contract_type_model(force=True)`. "
+                    "From a source checkout, you can instead run "
+                    "`python scripts/bootstrap_assets.py --contract-type-model`."
                 ) from fallback_error
 
     def make_predictions(

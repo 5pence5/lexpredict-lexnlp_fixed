@@ -107,9 +107,100 @@ def test_legacy_download_asset_call_infers_unique_trusted_entry(
         lambda **_kwargs: FakeResponse(payload, content_length=len(payload)),
     )
 
-    path = download.GitHubReleaseDownloader.download_asset(asset, tmp_path)
+    result = download.GitHubReleaseDownloader.download_asset(asset, tmp_path)
+    path = tmp_path / trusted.filename
 
+    assert result is None
     assert path.read_bytes() == payload
+
+
+def test_legacy_release_downloaders_return_exact_none(monkeypatch, tmp_path: Path):
+    sentinel = tmp_path / "verified.bin"
+    sentinel.write_bytes(b"verified")
+    forces = []
+
+    def fake_download_to_path(
+        cls,
+        tag,
+        *,
+        manifest_path=None,
+        force=False,
+    ):
+        assert tag == "pipeline/is-contract/0.1"
+        assert manifest_path is None
+        forces.append(force)
+        return sentinel
+
+    monkeypatch.setattr(
+        download.GitHubReleaseDownloader,
+        "download_release_to_path",
+        classmethod(fake_download_to_path),
+    )
+
+    assert (
+        download.GitHubReleaseDownloader.download_release(
+            "pipeline/is-contract/0.1",
+        )
+        is None
+    )
+    assert (
+        download.download_github_release(
+            "pipeline/is-contract/0.1",
+            prompt_user=False,
+        )
+        is None
+    )
+    assert (
+        download.download_github_release_to_path(
+            "pipeline/is-contract/0.1",
+            force=True,
+        )
+        == sentinel
+    )
+    assert forces == [False, False, True]
+
+
+def test_legacy_models_repo_assignment_and_environment_precedence(monkeypatch):
+    import lexnlp
+
+    calls = []
+
+    class Response:
+        pass
+
+    monkeypatch.delenv("LEXNLP_MODELS_REPO", raising=False)
+    monkeypatch.delenv("LEXNLP_MODELS_REPO_SLUG", raising=False)
+    monkeypatch.setattr(
+        lexnlp,
+        "MODELS_REPO",
+        "https://api.github.com/repos/legacy/root/releases/tags",
+    )
+    monkeypatch.setattr(download, "get", lambda **kwargs: calls.append(kwargs) or Response())
+
+    download.GitHubReleaseDownloader.get_tag("pipeline/example/1")
+
+    assert lexnlp.get_models_repo() == (
+        "https://api.github.com/repos/legacy/root/releases/tags/"
+    )
+    assert calls[-1]["url"].startswith(
+        "https://api.github.com/repos/legacy/root/releases/tags/"
+    )
+
+    monkeypatch.setattr(
+        download,
+        "MODELS_REPO",
+        "https://api.github.com/repos/legacy/download-module/releases/tags/",
+    )
+    download.GitHubReleaseDownloader.get_tag("pipeline/example/2")
+    assert calls[-1]["url"].startswith(
+        "https://api.github.com/repos/legacy/download-module/releases/tags/"
+    )
+
+    monkeypatch.setenv("LEXNLP_MODELS_REPO_SLUG", "environment/wins")
+    download.GitHubReleaseDownloader.get_tag("pipeline/example/3")
+    assert calls[-1]["url"].startswith(
+        "https://api.github.com/repos/environment/wins/releases/tags/"
+    )
 
 
 def test_packaged_manifest_covers_legacy_contract_model_and_corpora():
@@ -128,6 +219,18 @@ def test_packaged_manifest_covers_legacy_contract_model_and_corpora():
         "3b04a8a96e841a200dd85ba080ee14140be6a4a554e511dfd75d6dc080a9fab7"
     )
     assert manifest.get("corpus/contract-types/0.1").size == 16_644_740
+
+
+def test_runtime_and_quality_gate_release_manifests_are_byte_identical():
+    repository_root = Path(__file__).resolve().parents[4]
+
+    assert (
+        repository_root
+        / "lexnlp/ml/catalog/release_asset_manifest.json"
+    ).read_bytes() == (
+        repository_root
+        / "test_data/model_quality/release_asset_manifest.json"
+    ).read_bytes()
 
 
 def test_unlisted_tag_is_rejected_before_any_network_request(monkeypatch):
@@ -180,6 +283,10 @@ def test_custom_repository_requires_a_matching_reviewed_manifest(
     [
         ("../outside", "model.bin"),
         ("/absolute", "model.bin"),
+        (r"..\outside", "model.bin"),
+        (r"pipeline\..\..\outside", "model.bin"),
+        (r"C:\outside", "model.bin"),
+        (r"\\server\share\outside", "model.bin"),
         ("pipeline/example/1", "../model.bin"),
         ("pipeline/example/1", r"..\model.bin"),
     ],
@@ -238,6 +345,42 @@ def test_release_asset_host_must_match_manifest_repository(
         )
 
 
+def test_release_destination_cannot_escape_catalog_through_symlink(
+    monkeypatch,
+    tmp_path: Path,
+):
+    payload = b"reviewed"
+    trusted = trusted_asset("pipeline/example/1", "model.bin", payload)
+    manifest = download.AssetManifest(
+        models_repo=(
+            "https://api.github.com/repos/LexPredict/"
+            "lexpredict-lexnlp/releases/tags/"
+        ),
+        assets={trusted.tag: trusted},
+    )
+    catalog = tmp_path / "catalog"
+    external = tmp_path / "external"
+    catalog.mkdir()
+    external.mkdir()
+    try:
+        (catalog / "pipeline").symlink_to(external, target_is_directory=True)
+    except OSError as error:
+        pytest.skip(f"directory symlinks unavailable: {error}")
+
+    monkeypatch.setattr(download, "CATALOG", catalog)
+    monkeypatch.setattr(download, "load_asset_manifest", lambda _path=None: manifest)
+    monkeypatch.setattr(
+        download.GitHubReleaseDownloader,
+        "get_tag",
+        lambda *_args, **_kwargs: pytest.fail(
+            "unsafe destinations must fail before network access"
+        ),
+    )
+
+    with pytest.raises(download.AssetTrustError, match="escapes"):
+        download.GitHubReleaseDownloader.download_release_to_path(trusted.tag)
+
+
 def test_verified_asset_is_installed_atomically(monkeypatch, tmp_path: Path):
     payload = b"reviewed model payload"
     trusted = trusted_asset("pipeline/example/1", "model.bin", payload)
@@ -252,7 +395,7 @@ def test_verified_asset_is_installed_atomically(monkeypatch, tmp_path: Path):
         lambda **_kwargs: FakeResponse(payload, content_length=len(payload)),
     )
 
-    path = download.GitHubReleaseDownloader.download_asset(
+    path = download.GitHubReleaseDownloader.download_asset_to_path(
         asset,
         tmp_path,
         trusted=trusted,
@@ -263,6 +406,39 @@ def test_verified_asset_is_installed_atomically(monkeypatch, tmp_path: Path):
     assert list(tmp_path.glob("*.part")) == []
     assert list(tmp_path.glob(".*.tmp")) == []
     assert stat.S_IMODE(path.stat().st_mode) == 0o644
+
+
+def test_force_download_fetches_even_when_verified_cache_exists(
+    monkeypatch,
+    tmp_path: Path,
+):
+    payload = b"reviewed model payload"
+    trusted = trusted_asset("pipeline/example/1", "model.bin", payload)
+    destination = tmp_path / trusted.filename
+    destination.write_bytes(payload)
+    asset = {
+        "name": trusted.filename,
+        "size": trusted.size,
+        "url": "https://api.github.com/repos/reviewed/models/releases/assets/1",
+    }
+    calls = []
+
+    def fake_get(**kwargs):
+        calls.append(kwargs)
+        return FakeResponse(payload, content_length=len(payload))
+
+    monkeypatch.setattr(download, "get", fake_get)
+
+    path = download.GitHubReleaseDownloader.download_asset_to_path(
+        asset,
+        tmp_path,
+        trusted=trusted,
+        force=True,
+    )
+
+    assert path == destination
+    assert destination.read_bytes() == payload
+    assert len(calls) == 1
 
 
 def test_verified_asset_preserves_existing_permissions(monkeypatch, tmp_path: Path):
@@ -282,7 +458,7 @@ def test_verified_asset_preserves_existing_permissions(monkeypatch, tmp_path: Pa
         lambda **_kwargs: FakeResponse(payload, content_length=len(payload)),
     )
 
-    path = download.GitHubReleaseDownloader.download_asset(
+    path = download.GitHubReleaseDownloader.download_asset_to_path(
         asset,
         tmp_path,
         trusted=trusted,
@@ -447,5 +623,6 @@ def test_existing_verified_asset_avoids_network(monkeypatch, tmp_path: Path):
             tmp_path,
             trusted=trusted,
         )
-        == destination
+        is None
     )
+    assert destination.read_bytes() == payload

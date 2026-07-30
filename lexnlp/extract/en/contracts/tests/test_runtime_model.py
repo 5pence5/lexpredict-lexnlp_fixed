@@ -5,6 +5,8 @@ __version__ = "2.3.0"
 __maintainer__ = "LexPredict, LLC"
 __email__ = "support@contraxsuite.com"
 
+import pytest
+
 
 def test_collect_samples_uses_every_canonical_member_when_cap_is_zero(tmp_path):
     import io
@@ -127,6 +129,7 @@ def test_ensure_runtime_contract_type_model_force_trains(monkeypatch, tmp_path):
     retrain + overwrite the runtime model.
     """
     from lexnlp.extract.en.contracts import runtime_model
+    from lexnlp.ml import catalog
 
     calls = []
 
@@ -158,17 +161,12 @@ def test_ensure_runtime_contract_type_model_force_trains(monkeypatch, tmp_path):
         destination.write_bytes(b"dummy")
         return destination
 
+    monkeypatch.setattr(catalog, "CATALOG", tmp_path / "catalog")
+    catalog.invalidate_catalog_cache()
     monkeypatch.setattr(runtime_model, "ensure_tag_downloaded", ensure_tag_downloaded)
     monkeypatch.setattr(runtime_model, "collect_contract_type_samples", collect_samples)
     monkeypatch.setattr(runtime_model, "train_contract_type_pipeline", train_pipeline)
     monkeypatch.setattr(runtime_model, "write_pipeline_to_catalog", write_pipeline)
-
-    import lexnlp.ml.catalog
-
-    def get_path_from_catalog(_tag: str):
-        raise AssertionError("force=True should not consult the existing catalog path")
-
-    monkeypatch.setattr(lexnlp.ml.catalog, "get_path_from_catalog", get_path_from_catalog)
 
     result = runtime_model.ensure_runtime_contract_type_model(
         target_tag=runtime_model.RUNTIME_CONTRACT_TYPE_TAG,
@@ -176,5 +174,118 @@ def test_ensure_runtime_contract_type_model_force_trains(monkeypatch, tmp_path):
     )
 
     assert result == tmp_path / "pipeline_contract_type_classifier.cloudpickle"
-    assert ("write_pipeline_to_catalog", runtime_model.RUNTIME_CONTRACT_TYPE_TAG, True) in calls
+    assert (
+        "write_pipeline_to_catalog",
+        catalog.get_local_candidate_tag(runtime_model.RUNTIME_CONTRACT_TYPE_TAG),
+        True,
+    ) in calls
     assert ("train_contract_type_pipeline", 2, 2, 7, 75_000) in calls
+    catalog.invalidate_catalog_cache()
+
+
+def test_release_tag_lookup_aliases_physically_separate_local_candidate(
+    monkeypatch,
+    tmp_path,
+):
+    from lexnlp.ml import catalog
+
+    release_tag = "pipeline/is-contract/0.2"
+    local_tag = catalog.get_local_candidate_tag(release_tag)
+    local_path = tmp_path / local_tag / "model.cloudpickle"
+    local_path.parent.mkdir(parents=True)
+    local_path.write_bytes(b"local candidate")
+
+    monkeypatch.setattr(catalog, "CATALOG", tmp_path)
+    catalog.invalidate_catalog_cache()
+
+    with pytest.raises(FileNotFoundError, match="exact tag"):
+        catalog.get_exact_path_from_catalog(release_tag)
+    assert catalog.get_path_from_catalog(release_tag) == local_path
+    assert not (tmp_path / release_tag).exists()
+    catalog.invalidate_catalog_cache()
+
+
+def test_manifest_pinned_pipeline_write_rejects_non_manifest_bytes(
+    monkeypatch,
+    tmp_path,
+):
+    from lexnlp.extract.en.contracts import runtime_model
+    from lexnlp.ml import catalog
+    from lexnlp.ml.catalog import download
+
+    monkeypatch.setattr(catalog, "CATALOG", tmp_path)
+    catalog.invalidate_catalog_cache()
+
+    with pytest.raises(download.ChecksumError, match="size|SHA-256"):
+        runtime_model.write_pipeline_to_catalog(
+            pipeline={"locally": "trained"},
+            target_tag=runtime_model.RUNTIME_CONTRACT_TYPE_TAG,
+            force=True,
+        )
+
+    release_dir = tmp_path / runtime_model.RUNTIME_CONTRACT_TYPE_TAG
+    assert not (
+        release_dir / runtime_model.CONTRACT_TYPE_MODEL_FILENAME
+    ).exists()
+    assert not list(release_dir.glob(".*.tmp"))
+    catalog.invalidate_catalog_cache()
+
+
+def test_runtime_model_reuses_private_candidate_without_release_directory(
+    monkeypatch,
+    tmp_path,
+):
+    from lexnlp.extract.en.contracts import runtime_model
+    from lexnlp.ml import catalog
+    from lexnlp.ml.catalog import download
+
+    monkeypatch.setattr(catalog, "CATALOG", tmp_path)
+    catalog.invalidate_catalog_cache()
+    local_tag = catalog.get_local_candidate_tag(
+        runtime_model.RUNTIME_CONTRACT_TYPE_TAG
+    )
+    local_path = runtime_model.write_pipeline_to_catalog(
+        pipeline={"candidate": 1},
+        target_tag=local_tag,
+        force=True,
+    )
+
+    monkeypatch.setattr(
+        download,
+        "download_github_release_to_path",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a valid private candidate should be reused"
+        ),
+    )
+
+    assert runtime_model.ensure_runtime_contract_type_model() == local_path
+    assert not (tmp_path / runtime_model.RUNTIME_CONTRACT_TYPE_TAG).exists()
+    catalog.invalidate_catalog_cache()
+
+
+def test_runtime_model_does_not_train_after_release_checksum_failure(
+    monkeypatch,
+    tmp_path,
+):
+    from lexnlp.extract.en.contracts import runtime_model
+    from lexnlp.ml import catalog
+    from lexnlp.ml.catalog import download
+
+    monkeypatch.setattr(catalog, "CATALOG", tmp_path)
+    catalog.invalidate_catalog_cache()
+    monkeypatch.setattr(
+        download,
+        "download_github_release_to_path",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            download.ChecksumError("release checksum mismatch")
+        ),
+    )
+    monkeypatch.setattr(
+        runtime_model,
+        "ensure_tag_downloaded",
+        lambda _tag: pytest.fail("trust failure must not trigger training"),
+    )
+
+    with pytest.raises(download.ChecksumError, match="checksum mismatch"):
+        runtime_model.ensure_runtime_contract_type_model()
+    catalog.invalidate_catalog_cache()

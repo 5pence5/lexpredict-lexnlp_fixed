@@ -12,6 +12,7 @@ __email__ = "support@contraxsuite.com"
 
 # standard library
 import logging
+import pickle
 import tarfile
 from collections import defaultdict
 from pathlib import Path
@@ -22,8 +23,9 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.pipeline import Pipeline
 from threadpoolctl import threadpool_limits
+from requests import RequestException
 
-from lexnlp.ml.artifact_io import atomic_pickle_dump
+from lexnlp.ml.artifact_io import atomic_output_path
 from lexnlp.utils.unpickler import load_sklearn_model
 
 
@@ -37,19 +39,44 @@ CONTRACT_TYPE_TRAINING_THREADS = 1
 
 
 def ensure_tag_downloaded(tag: str) -> Path:
-    from lexnlp.ml.catalog import get_path_from_catalog
-    from lexnlp.ml.catalog.download import download_github_release
+    from lexnlp.ml.catalog import get_exact_path_from_catalog
+    from lexnlp.ml.catalog.download import (
+        download_github_release_to_path,
+        load_asset_manifest,
+        verify_trusted_asset_file,
+    )
 
+    manifest = load_asset_manifest()
+    trusted = manifest.assets.get(tag)
     try:
-        return get_path_from_catalog(tag)
+        path = get_exact_path_from_catalog(tag)
     except FileNotFoundError:
         LOGGER.info("Catalog tag missing; downloading release tag=%s", tag)
-        download_github_release(tag, prompt_user=False)
-        return get_path_from_catalog(tag)
+        return download_github_release_to_path(tag)
+
+    if trusted is not None:
+        verify_trusted_asset_file(path, tag)
+    return path
 
 
 def load_pipeline_for_tag(tag: str) -> Pipeline:
-    path = ensure_tag_downloaded(tag)
+    from lexnlp.ml.catalog import get_exact_path_from_catalog, get_path_from_catalog
+    from lexnlp.ml.catalog.download import load_asset_manifest, verify_trusted_asset_file
+
+    try:
+        path = get_path_from_catalog(tag)
+    except FileNotFoundError:
+        path = ensure_tag_downloaded(tag)
+    else:
+        try:
+            exact_path = get_exact_path_from_catalog(tag)
+        except FileNotFoundError:
+            # ``get_path_from_catalog`` may intentionally resolve a private
+            # local candidate for a missing release tag.
+            pass
+        else:
+            if exact_path == path and tag in load_asset_manifest().assets:
+                verify_trusted_asset_file(path, tag)
     with path.open("rb") as model_file:
         return load_sklearn_model(model_file)
 
@@ -164,17 +191,29 @@ def write_pipeline_to_catalog(
     target_tag: str,
     force: bool,
 ) -> Path:
-    from lexnlp.ml.catalog import CATALOG
+    from lexnlp.ml.catalog import get_catalog_directory, invalidate_catalog_cache
+    from lexnlp.ml.catalog.download import (
+        AssetTrustError,
+        load_asset_manifest,
+        verify_trusted_asset_file,
+        verify_trusted_asset_payload,
+    )
 
-    destination_dir = CATALOG / target_tag
+    destination_dir = get_catalog_directory(target_tag)
     destination_dir.mkdir(parents=True, exist_ok=True)
     destination_path = destination_dir / CONTRACT_TYPE_MODEL_FILENAME
+    manifest = load_asset_manifest()
+    trusted_target = manifest.assets.get(target_tag)
 
     if destination_path.exists() and not force:
         try:
+            if trusted_target is not None:
+                verify_trusted_asset_file(destination_path, target_tag)
             with destination_path.open("rb") as model_file:
                 load_sklearn_model(model_file)
             return destination_path
+        except AssetTrustError:
+            raise
         except Exception:
             LOGGER.warning(
                 "Existing contract-type model is invalid; replacing it: %s",
@@ -182,7 +221,16 @@ def write_pipeline_to_catalog(
                 exc_info=True,
             )
 
-    atomic_pickle_dump(pipeline, destination_path)
+    with atomic_output_path(destination_path) as temporary_path:
+        with temporary_path.open("wb") as model_file:
+            pickle.dump(pipeline, model_file)
+        with temporary_path.open("rb") as model_file:
+            load_sklearn_model(model_file)
+        if trusted_target is not None:
+            # A manifest-pinned release tag may only contain the exact reviewed
+            # bytes.  Locally trained runtime candidates use a private tag.
+            verify_trusted_asset_payload(temporary_path, target_tag)
+    invalidate_catalog_cache()
     return destination_path
 
 
@@ -195,42 +243,73 @@ def ensure_runtime_contract_type_model(
     random_state: int = 7,
     max_features: int = 75_000,
 ) -> Path:
-    from lexnlp.ml.catalog import get_path_from_catalog
+    from lexnlp.ml.catalog import (
+        get_exact_path_from_catalog,
+        get_local_candidate_tag,
+    )
+    from lexnlp.ml.catalog.download import (
+        AssetTrustError,
+        download_github_release_to_path,
+        load_asset_manifest,
+        verify_trusted_asset_file,
+    )
 
-    invalid_local_model = False
+    manifest = load_asset_manifest()
+    trusted_release = target_tag in manifest.assets
+    local_target_tag = (
+        get_local_candidate_tag(target_tag)
+        if trusted_release
+        else target_tag
+    )
+
+    if trusted_release:
+        try:
+            release_path = get_exact_path_from_catalog(target_tag)
+        except FileNotFoundError:
+            pass
+        else:
+            # Never turn a checksum/trust failure into a training fallback.
+            verify_trusted_asset_file(release_path, target_tag)
+            if not force:
+                with release_path.open("rb") as model_file:
+                    load_sklearn_model(model_file)
+                return release_path
+
     if not force:
         try:
-            existing_path = get_path_from_catalog(target_tag)
+            local_path = get_exact_path_from_catalog(local_target_tag)
         except FileNotFoundError:
             pass
         else:
             try:
-                with existing_path.open("rb") as model_file:
+                with local_path.open("rb") as model_file:
                     load_sklearn_model(model_file)
-                return existing_path
+                return local_path
             except Exception:
-                invalid_local_model = True
                 LOGGER.warning(
-                    "Existing runtime contract-type model is invalid; rebuilding it: %s",
-                    existing_path,
+                    "Existing local contract-type candidate is invalid; rebuilding it: %s",
+                    local_path,
                     exc_info=True,
                 )
 
+    if trusted_release and not force:
         # Prefer downloading a published runtime-compatible artifact when
         # available to avoid retraining in CI environments.
-        if not invalid_local_model:
-            try:
-                downloaded_path = ensure_tag_downloaded(target_tag)
-                with downloaded_path.open("rb") as model_file:
-                    load_sklearn_model(model_file)
-                return downloaded_path
-            except Exception as exc:
-                LOGGER.warning(
-                    "Unable to load runtime contract-type model tag=%s; falling back to training. error=%s",
-                    target_tag,
-                    exc,
-                    exc_info=True,
-                )
+        try:
+            downloaded_path = download_github_release_to_path(target_tag)
+        except AssetTrustError:
+            raise
+        except RequestException as exc:
+            LOGGER.warning(
+                "Unable to download runtime contract-type release tag=%s; "
+                "building private local candidate instead. error=%s",
+                target_tag,
+                exc,
+            )
+        else:
+            with downloaded_path.open("rb") as model_file:
+                load_sklearn_model(model_file)
+            return downloaded_path
 
     corpus_archive = ensure_tag_downloaded(CONTRACT_TYPE_CORPUS_TAG)
     texts, labels, _counts = collect_contract_type_samples(
@@ -246,8 +325,13 @@ def ensure_runtime_contract_type_model(
     )
     destination_path = write_pipeline_to_catalog(
         pipeline=pipeline,
-        target_tag=target_tag,
+        target_tag=local_target_tag,
         force=True,
     )
-    LOGGER.info("Trained runtime contract-type model tag=%s at %s", target_tag, destination_path)
+    LOGGER.info(
+        "Trained local runtime contract-type candidate release_tag=%s local_tag=%s at %s",
+        target_tag,
+        local_target_tag,
+        destination_path,
+    )
     return destination_path

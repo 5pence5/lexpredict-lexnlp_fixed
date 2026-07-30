@@ -12,6 +12,7 @@ include libs/download_stanford_nlp.sh
 include libs/download_wiki.sh
 recursive-include scripts *.py *.sh
 recursive-include documentation *
+prune documentation/docs/build
 prune libs/stanford_nlp
 global-exclude __pycache__
 global-exclude *.py[cod]
