@@ -211,8 +211,11 @@ class LosslessHierarchyTests(unittest.TestCase):
             [node.label for node in items],
             ["1)", "(i)", "2)"],
         )
-        nested_start = text.index("  (i)")
+        nested_line_start = text.index("  (i)")
+        nested_start = text.index("(i)")
+        self.assertNotEqual(nested_line_start, nested_start)
         self.assertIn(nested_start, [node.start for node in items])
+        self.assertNotIn(nested_line_start, [node.start for node in items])
         self.assertEqual(hierarchy.reconstruct(), text)
 
     def test_injected_table_augments_builtin_schedule(self):
@@ -1086,7 +1089,9 @@ class FinalCoreCorrectionTests(unittest.TestCase):
         self.assertEqual(by_label["(i)"].start, text.index("(i)"))
         self.assertEqual(by_label["(ii)"].start, text.index("(ii)"))
         self.assertEqual(by_label["(b)"].end, text.index("(c)"))
-        self.assertEqual(by_label["(i)"].end, text.index("(ii)"))
+        next_nested_line_start = text.index("    (ii)")
+        self.assertEqual(by_label["(i)"].end, next_nested_line_start)
+        self.assertLess(by_label["(i)"].end, by_label["(ii)"].start)
         self.assertEqual(by_label["(ii)"].end, text.index("(c)"))
         self.assertGreater(by_label["(i)"].level, by_label["(b)"].level)
         self.assertGreater(by_label["(ii)"].level, by_label["(b)"].level)

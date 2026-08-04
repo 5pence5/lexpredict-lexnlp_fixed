@@ -798,9 +798,11 @@ def _outline_spans(
         limit = len(text) if parent_key is None else parent_ends[parent_key]
         ends = [limit] * len(markers)
         stack: list[int] = []
-        for index, (marker_start, _line, _kind, _label_value, level) in enumerate(markers):
+        for index, (_marker_start, line, _kind, _label_value, level) in enumerate(markers):
             while stack and markers[stack[-1]][4] >= level:
-                ends[stack.pop()] = marker_start
+                # Structural spans begin at their marker, but the prior sibling
+                # must stop before indentation belonging to this source line.
+                ends[stack.pop()] = line.start
             stack.append(index)
         while stack:
             ends[stack.pop()] = limit
