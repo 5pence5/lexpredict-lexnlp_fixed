@@ -34,6 +34,12 @@ Tokenization and related methods
 Segmentation and related methods for real-world text
 ----------------------------------------------------
 
+For return-shape, coordinate and failure-behaviour guidance across the legacy
+APIs, see :ref:`segmentation_current_api`.  The additive, lossless hierarchy,
+strict-budget chunker and embedding-payload contract are described in
+:ref:`lossless_segmentation_api`; their evidence, promotion method and future
+layout/multi-span extensions are recorded in :ref:`segmentation_v2_design`.
+
 * :ref:`Sentences <nlp_en_segments_sentences>`
 
 * :ref:`Paragraphs <nlp_en_segments_paragraphs>`

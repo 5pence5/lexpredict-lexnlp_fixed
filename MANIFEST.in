@@ -8,6 +8,11 @@ exclude python-requirements.txt
 exclude python-requirements-dev.txt
 exclude python-requirements-full.txt
 recursive-include lexnlp *.csv *.json *.pickle *.pickle.gzip *.txt *.xml
+# The repository-level segmentation gates import their hermetic helper module
+# and fixtures.  Keep those developer tools runnable from the source archive;
+# they remain excluded from the installed wheel by package discovery rules.
+recursive-include lexnlp/nlp/en/tests *.py
+recursive-include test_data/lexnlp/nlp/en/sota_segmentation *.json
 include libs/download_stanford_nlp.sh
 include libs/download_wiki.sh
 recursive-include scripts *.py *.sh

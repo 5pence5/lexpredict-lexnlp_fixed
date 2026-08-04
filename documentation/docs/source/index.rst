@@ -15,6 +15,9 @@ Table of Contents
 
    about
    lexnlp
+   guides/segmentation_current_api
+   guides/lossless_segmentation_api
+   development/segmentation_v2_design
    changes
    license
 

@@ -1,6 +1,100 @@
+"""Public lossless segmentation, chunking, backend, and payload APIs."""
+
 __author__ = "ContraxSuite, LLC; LexPredict, LLC"
-__copyright__ = "Copyright 2015-2021, ContraxSuite, LLC"
-__license__ = "https://github.com/LexPredict/lexpredict-lexnlp/blob/2.3.0/LICENSE"
-__version__ = "2.3.0"
+__copyright__ = "Copyright 2015-2026, ContraxSuite, LLC; LexPredict, LLC"
+__license__ = "https://github.com/LexPredict/lexpredict-lexnlp/blob/master/LICENSE"
+__version__ = "2.4.0a1"
 __maintainer__ = "LexPredict, LLC"
 __email__ = "support@contraxsuite.com"
+
+from lexnlp.nlp.en.segments.backends import (
+    SaTSentenceSegmenter,
+    SplitModel,
+    legacy_sentence_segmenter,
+    parts_to_spans,
+)
+from lexnlp.nlp.en.segments.chunks import (
+    CHUNKING_SCHEMA_VERSION,
+    CHUNKING_SERIALIZER_VERSION,
+    DEFAULT_MAX_CHARS,
+    ChunkingManifest,
+    ChunkProvenance,
+    ContainerPolicy,
+    DocumentChunk,
+    SegmentReference,
+    TokenCounter,
+    chunk_document,
+    compute_chunk_metadata_sha256,
+    compute_provenance_sha256,
+    count_tokens,
+    iter_chunks,
+    reconstruct_chunks,
+)
+from lexnlp.nlp.en.segments.hierarchy import (
+    HIERARCHY_SCHEMA_VERSION,
+    MAX_HIERARCHY_DEPTH,
+    DocumentHierarchy,
+    HierarchyManifest,
+    ParagraphSegmenter,
+    ParagraphSpan,
+    Segment,
+    SegmentAttribute,
+    SegmentKind,
+    SentenceSegmenter,
+    SentenceSpan,
+    StructuralMode,
+    StructuralSpan,
+    StructureProfile,
+    iter_document_segments,
+    segment_document,
+)
+from lexnlp.nlp.en.segments.payloads import (
+    EMBEDDING_PAYLOAD_SERIALIZATION_VERSION,
+    ContextFragment,
+    EmbeddingPayload,
+    PayloadBudgetExceeded,
+    render_embedding_payload,
+)
+
+__all__ = [
+    "CHUNKING_SCHEMA_VERSION",
+    "CHUNKING_SERIALIZER_VERSION",
+    "DEFAULT_MAX_CHARS",
+    "EMBEDDING_PAYLOAD_SERIALIZATION_VERSION",
+    "HIERARCHY_SCHEMA_VERSION",
+    "MAX_HIERARCHY_DEPTH",
+    "ChunkingManifest",
+    "ChunkProvenance",
+    "ContainerPolicy",
+    "ContextFragment",
+    "DocumentChunk",
+    "DocumentHierarchy",
+    "EmbeddingPayload",
+    "HierarchyManifest",
+    "ParagraphSegmenter",
+    "ParagraphSpan",
+    "PayloadBudgetExceeded",
+    "SaTSentenceSegmenter",
+    "Segment",
+    "SegmentAttribute",
+    "SegmentKind",
+    "SegmentReference",
+    "SentenceSegmenter",
+    "SentenceSpan",
+    "SplitModel",
+    "StructuralMode",
+    "StructuralSpan",
+    "StructureProfile",
+    "TokenCounter",
+    "chunk_document",
+    "compute_chunk_metadata_sha256",
+    "compute_provenance_sha256",
+    "count_tokens",
+    "iter_chunks",
+    "iter_document_segments",
+    "legacy_sentence_segmenter",
+    "parts_to_spans",
+    "reconstruct_chunks",
+    "render_embedding_payload",
+    "segment_document",
+]

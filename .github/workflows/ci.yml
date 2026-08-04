@@ -73,6 +73,64 @@ jobs:
       - name: Run base suite
         run: .venv/bin/python -m pytest lexnlp scripts/tests
 
+  segmentation-quality:
+    name: Lossless Segmentation Quality, Performance, and Scaling
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Set up Python
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Run dependency-free structure and retrieval gate
+        run: |
+          python scripts/segmentation_quality_gate.py \
+            --json-output artifacts/segmentation/quality.json
+
+      - name: Run character-mode operational benchmark
+        run: |
+          python scripts/segmentation_benchmark.py \
+            --mode characters \
+            --characters 200000 \
+            --repeat 3 \
+            --min-throughput 10000 \
+            --max-peak-mib 64 \
+            --json-output artifacts/segmentation/benchmark-characters.json
+
+      - name: Run token-mode operational benchmark
+        run: |
+          python scripts/segmentation_benchmark.py \
+            --mode tokens \
+            --characters 100000 \
+            --repeat 2 \
+            --min-throughput 10000 \
+            --max-peak-mib 64 \
+            --json-output artifacts/segmentation/benchmark-tokens.json
+
+      - name: Run statute-profile scaling benchmark
+        run: |
+          python scripts/segmentation_benchmark.py \
+            --statute-scaling \
+            --scaling-sizes 250,500,1000,2000 \
+            --scaling-repeat 3 \
+            --max-scaling-doubling-ratio 3.2 \
+            --max-scaling-exponent 1.7 \
+            --json-output artifacts/segmentation/benchmark-statute-scaling.json
+
+      - name: Upload segmentation evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: segmentation-quality-performance-and-scaling
+          path: |
+            artifacts/segmentation/quality.json
+            artifacts/segmentation/benchmark-characters.json
+            artifacts/segmentation/benchmark-tokens.json
+            artifacts/segmentation/benchmark-statute-scaling.json
+          if-no-files-found: error
   cross-platform-smoke:
     name: ${{ matrix.os }} / Python ${{ matrix.python-version }}
     runs-on: ${{ matrix.os }}

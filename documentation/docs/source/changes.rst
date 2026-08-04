@@ -15,6 +15,23 @@ Unreleased
   and Apache Tika 3.3.2.
 * Retired the obsolete Pipenv, split-requirements, Travis, and legacy Read the
   Docs configurations.
+* Added an experimental 2.4.0a1 lossless English legal-document hierarchy with
+  exact source spans, conservative/statute profiles, composable structural,
+  paragraph and sentence backends, and realised-tree manifests.
+* Added an opt-in caller-owned Segment Any Text adapter which requires a pinned
+  backend identity and performs no model import or download.
+* Added deterministic character- or explicit-token-counter chunking with
+  strict budgets, structure-preserving/dense container policies, explicit
+  overlap, content-versus-overlap provenance, canonical manifests and
+  digest-qualified chunk identities.
+* Added a versioned final embedding-payload serialiser for traced headings and
+  table headers, with exact caller-tokeniser validation, canonical payload
+  metadata identities and typed overflow.
+* Added hermetic exact-span, structural, retrieval-plumbing and character/token
+  operational regression gates with canonical evidence digests and a dedicated
+  statute-profile scaling lane.  These small synthetic fixtures are not
+  held-out SOTA evidence; representative legal, layout and multilingual
+  evaluation remains a promotion gate.
 
 2.3.0 - November 30, 2022
 -------------------------

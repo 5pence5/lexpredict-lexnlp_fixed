@@ -1,0 +1,524 @@
+{
+  "schema_version": 1,
+  "marker": "QUALITY_BLOB_RECONSTRUCTION_V3",
+  "description": "Hermetic, manually auditable legal segmentation regression corpus; not population-level SOTA evidence.",
+  "cases": [
+    {
+      "id": "mixed_newlines_and_unicode",
+      "structure_profile": "conservative",
+      "text": "MASTER SERVICES AGREEMENT\r\n\r\n1. DEFINITIONS\n1.1 “Business Day” means a day on which banks are open in Αθήνα.\r1.2 “Café” includes Café Europa.\n\r2. NOTICES 📬\r\nNotices shall be sent to legal@example.test.\r\n",
+      "required_kinds": [
+        "section",
+        "clause",
+        "paragraph",
+        "sentence"
+      ],
+      "forbidden_kinds": [],
+      "gold_segments": [
+        {
+          "kind": "section",
+          "label": "1. DEFINITIONS",
+          "anchor": "1. DEFINITIONS"
+        },
+        {
+          "kind": "clause",
+          "label": "1.1",
+          "anchor": "1.1 “Business Day”"
+        },
+        {
+          "kind": "clause",
+          "label": "1.2",
+          "anchor": "1.2 “Café”"
+        },
+        {
+          "kind": "section",
+          "label": "2. NOTICES 📬",
+          "anchor": "2. NOTICES 📬"
+        },
+        {
+          "kind": "section",
+          "label": "MASTER SERVICES AGREEMENT",
+          "anchor": "MASTER SERVICES AGREEMENT"
+        }
+      ],
+      "gold_structure": [
+        {
+          "kind": "section",
+          "label": "MASTER SERVICES AGREEMENT",
+          "start_anchor": "MASTER SERVICES AGREEMENT",
+          "end_anchor": "1. DEFINITIONS"
+        },
+        {
+          "kind": "section",
+          "label": "1. DEFINITIONS",
+          "start_anchor": "1. DEFINITIONS",
+          "end_anchor": "2. NOTICES 📬"
+        },
+        {
+          "kind": "clause",
+          "label": "1.1",
+          "start_anchor": "1.1 “Business Day”",
+          "end_anchor": "1.2 “Café”"
+        },
+        {
+          "kind": "clause",
+          "label": "1.2",
+          "start_anchor": "1.2 “Café”",
+          "end_anchor": "2. NOTICES 📬"
+        },
+        {
+          "kind": "section",
+          "label": "2. NOTICES 📬",
+          "start_anchor": "2. NOTICES 📬",
+          "end_anchor": "$END"
+        }
+      ]
+    },
+    {
+      "id": "nested_legal_clauses_and_lists",
+      "structure_profile": "conservative",
+      "text": "ARTICLE IV\nCOVENANTS\n\n4.1 Information Undertakings. The Borrower shall:\n(a) deliver the Accounts within 30 days;\n(b) notify the Agent promptly if:\n    (i) a Default occurs; or\n    (ii) litigation exceeds £1,000,000.\n\n4.2 Exceptions. Clause 4.1 does not apply to:\n• information protected by privilege;\n• material prohibited by law; and\n• data described in Schedule 2.\n",
+      "required_kinds": [
+        "section",
+        "clause",
+        "list_item",
+        "paragraph",
+        "sentence"
+      ],
+      "forbidden_kinds": [],
+      "gold_segments": [
+        {
+          "kind": "section",
+          "label": "ARTICLE IV",
+          "anchor": "ARTICLE IV"
+        },
+        {
+          "kind": "clause",
+          "label": "4.1",
+          "anchor": "4.1 Information Undertakings."
+        },
+        {
+          "kind": "list_item",
+          "label": "(a)",
+          "anchor": "(a) deliver the Accounts"
+        },
+        {
+          "kind": "list_item",
+          "label": "(ii)",
+          "anchor": "(ii) litigation exceeds"
+        },
+        {
+          "kind": "clause",
+          "label": "4.2",
+          "anchor": "4.2 Exceptions."
+        },
+        {
+          "kind": "list_item",
+          "label": "(b)",
+          "anchor": "(b) notify the Agent"
+        },
+        {
+          "kind": "list_item",
+          "label": "(i)",
+          "anchor": "(i) a Default occurs"
+        },
+        {
+          "kind": "list_item",
+          "label": "•",
+          "anchor": "• information protected by privilege;"
+        },
+        {
+          "kind": "list_item",
+          "label": "•",
+          "anchor": "• material prohibited by law;"
+        },
+        {
+          "kind": "list_item",
+          "label": "•",
+          "anchor": "• data described in Schedule 2."
+        }
+      ],
+      "gold_structure": [
+        {
+          "kind": "section",
+          "label": "ARTICLE IV",
+          "start_anchor": "ARTICLE IV",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "clause",
+          "label": "4.1",
+          "start_anchor": "4.1 Information Undertakings.",
+          "end_anchor": "4.2 Exceptions."
+        },
+        {
+          "kind": "list_item",
+          "label": "(a)",
+          "start_anchor": "(a) deliver the Accounts",
+          "end_anchor": "(b) notify the Agent"
+        },
+        {
+          "kind": "list_item",
+          "label": "(b)",
+          "start_anchor": "(b) notify the Agent",
+          "end_anchor": "4.2 Exceptions."
+        },
+        {
+          "kind": "list_item",
+          "label": "(i)",
+          "start_anchor": "(i) a Default occurs",
+          "end_anchor": "    (ii) litigation exceeds"
+        },
+        {
+          "kind": "list_item",
+          "label": "(ii)",
+          "start_anchor": "(ii) litigation exceeds",
+          "end_anchor": "4.2 Exceptions."
+        },
+        {
+          "kind": "clause",
+          "label": "4.2",
+          "start_anchor": "4.2 Exceptions.",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "list_item",
+          "label": "•",
+          "start_anchor": "• information protected by privilege;",
+          "end_anchor": "• material prohibited by law;"
+        },
+        {
+          "kind": "list_item",
+          "label": "•",
+          "start_anchor": "• material prohibited by law;",
+          "end_anchor": "• data described in Schedule 2."
+        },
+        {
+          "kind": "list_item",
+          "label": "•",
+          "start_anchor": "• data described in Schedule 2.",
+          "end_anchor": "$END"
+        }
+      ]
+    },
+    {
+      "id": "schedule_contains_part",
+      "structure_profile": "conservative",
+      "text": "SCHEDULE 1\nFEES\n\n| Service | Currency | Amount |\n| Hosting | GBP | 12,500.00 |\n| Support | EUR | 3.750,00 |\n\f\n<Page 2>\n\nPART B — SERVICE LEVELS\nB.1 Availability: 99.95%.\nB.2 Credits:\n1) 5% for Tier One;\n2) 10% for Tier Two.\n",
+      "required_kinds": [
+        "section",
+        "clause",
+        "list_item",
+        "paragraph",
+        "sentence"
+      ],
+      "forbidden_kinds": [],
+      "gold_segments": [
+        {
+          "kind": "section",
+          "label": "SCHEDULE 1",
+          "anchor": "SCHEDULE 1"
+        },
+        {
+          "kind": "section",
+          "label": "PART B — SERVICE LEVELS",
+          "anchor": "PART B — SERVICE LEVELS"
+        },
+        {
+          "kind": "clause",
+          "label": "B.1",
+          "anchor": "B.1 Availability:"
+        },
+        {
+          "kind": "clause",
+          "label": "B.2",
+          "anchor": "B.2 Credits:"
+        },
+        {
+          "kind": "list_item",
+          "label": "1)",
+          "anchor": "1) 5% for Tier One;"
+        },
+        {
+          "kind": "list_item",
+          "label": "2)",
+          "anchor": "2) 10% for Tier Two."
+        }
+      ],
+      "gold_structure": [
+        {
+          "kind": "section",
+          "label": "SCHEDULE 1",
+          "start_anchor": "SCHEDULE 1",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "section",
+          "label": "PART B — SERVICE LEVELS",
+          "start_anchor": "PART B — SERVICE LEVELS",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "clause",
+          "label": "B.1",
+          "start_anchor": "B.1 Availability:",
+          "end_anchor": "B.2 Credits:"
+        },
+        {
+          "kind": "clause",
+          "label": "B.2",
+          "start_anchor": "B.2 Credits:",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "list_item",
+          "label": "1)",
+          "start_anchor": "1) 5% for Tier One;",
+          "end_anchor": "2) 10% for Tier Two."
+        },
+        {
+          "kind": "list_item",
+          "label": "2)",
+          "start_anchor": "2) 10% for Tier Two.",
+          "end_anchor": "$END"
+        }
+      ]
+    },
+    {
+      "id": "nested_heading_scopes",
+      "structure_profile": "conservative",
+      "text": "PART II\nGENERAL TERMS\n\nARTICLE IV-A\nCOVENANTS\n\nSECTION 4.1 REPORTING\n4.1(a) The Borrower shall report.\n\nSECTION 4.2 EXCEPTIONS\n4.2(a) This clause survives.\n\nARTICLE V\nREMEDIES\n\nSECTION 5.1 ENFORCEMENT\n5.1(a) The Agent may enforce.\n",
+      "required_kinds": [
+        "section",
+        "clause",
+        "paragraph",
+        "sentence"
+      ],
+      "forbidden_kinds": [],
+      "gold_segments": [
+        {
+          "kind": "section",
+          "label": "PART II",
+          "anchor": "PART II"
+        },
+        {
+          "kind": "section",
+          "label": "ARTICLE IV-A",
+          "anchor": "ARTICLE IV-A"
+        },
+        {
+          "kind": "section",
+          "label": "SECTION 4.1 REPORTING",
+          "anchor": "SECTION 4.1 REPORTING"
+        },
+        {
+          "kind": "section",
+          "label": "ARTICLE V",
+          "anchor": "ARTICLE V"
+        },
+        {
+          "kind": "section",
+          "label": "SECTION 4.2 EXCEPTIONS",
+          "anchor": "SECTION 4.2 EXCEPTIONS"
+        },
+        {
+          "kind": "clause",
+          "label": "4.2(a)",
+          "anchor": "4.2(a) This clause"
+        },
+        {
+          "kind": "section",
+          "label": "SECTION 5.1 ENFORCEMENT",
+          "anchor": "SECTION 5.1 ENFORCEMENT"
+        },
+        {
+          "kind": "clause",
+          "label": "5.1(a)",
+          "anchor": "5.1(a) The Agent"
+        }
+      ],
+      "gold_structure": [
+        {
+          "kind": "section",
+          "label": "PART II",
+          "start_anchor": "PART II",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "section",
+          "label": "ARTICLE IV-A",
+          "start_anchor": "ARTICLE IV-A",
+          "end_anchor": "ARTICLE V"
+        },
+        {
+          "kind": "section",
+          "label": "SECTION 4.1 REPORTING",
+          "start_anchor": "SECTION 4.1 REPORTING",
+          "end_anchor": "SECTION 4.2 EXCEPTIONS"
+        },
+        {
+          "kind": "clause",
+          "label": "4.1(a)",
+          "start_anchor": "4.1(a) The Borrower",
+          "end_anchor": "SECTION 4.2 EXCEPTIONS"
+        },
+        {
+          "kind": "section",
+          "label": "SECTION 4.2 EXCEPTIONS",
+          "start_anchor": "SECTION 4.2 EXCEPTIONS",
+          "end_anchor": "ARTICLE V"
+        },
+        {
+          "kind": "clause",
+          "label": "4.2(a)",
+          "start_anchor": "4.2(a) This clause",
+          "end_anchor": "ARTICLE V"
+        },
+        {
+          "kind": "section",
+          "label": "ARTICLE V",
+          "start_anchor": "ARTICLE V",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "section",
+          "label": "SECTION 5.1 ENFORCEMENT",
+          "start_anchor": "SECTION 5.1 ENFORCEMENT",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "clause",
+          "label": "5.1(a)",
+          "start_anchor": "5.1(a) The Agent",
+          "end_anchor": "$END"
+        }
+      ],
+      "expected_ancestry": [
+        {
+          "kind": "clause",
+          "label": "4.2(a)",
+          "ancestors": [
+            [
+              "section",
+              "PART II"
+            ],
+            [
+              "section",
+              "ARTICLE IV-A"
+            ],
+            [
+              "section",
+              "SECTION 4.2 EXCEPTIONS"
+            ]
+          ]
+        },
+        {
+          "kind": "clause",
+          "label": "5.1(a)",
+          "ancestors": [
+            [
+              "section",
+              "PART II"
+            ],
+            [
+              "section",
+              "ARTICLE V"
+            ],
+            [
+              "section",
+              "SECTION 5.1 ENFORCEMENT"
+            ]
+          ]
+        }
+      ]
+    },
+    {
+      "id": "abbreviations_and_citations",
+      "structure_profile": "conservative",
+      "text": "3. GOVERNING LAW\nThe U.S. Supreme Court cited Smith v. Jones, 410 U.S. 113 (1973), at p. 117.\nAcme Ltd. shall comply with s. 2(1)(a) of the Act. No. 4 applies at 3.14% p.a.\nContact Dr. A. Singh at a.singh@example.test",
+      "required_kinds": [
+        "section",
+        "paragraph",
+        "sentence"
+      ],
+      "forbidden_kinds": [
+        "clause"
+      ],
+      "gold_segments": [
+        {
+          "kind": "section",
+          "label": "3. GOVERNING LAW",
+          "anchor": "3. GOVERNING LAW"
+        },
+        {
+          "kind": "sentence",
+          "anchor": "Acme Ltd. shall comply with s. 2(1)(a) of the Act."
+        }
+      ],
+      "gold_structure": [
+        {
+          "kind": "section",
+          "label": "3. GOVERNING LAW",
+          "start_anchor": "3. GOVERNING LAW",
+          "end_anchor": "$END"
+        }
+      ]
+    },
+    {
+      "id": "ordinary_numbered_obligations_are_not_sections",
+      "structure_profile": "conservative",
+      "text": "Items required:\n1 Deliver widgets\nat the site\n2 Pay fees\nwithin 30 days",
+      "required_kinds": [
+        "paragraph",
+        "sentence"
+      ],
+      "forbidden_kinds": [
+        "section"
+      ],
+      "gold_segments": [
+        {
+          "kind": "paragraph",
+          "anchor": "Items required:\n1 Deliver widgets\nat the site\n2 Pay fees\nwithin 30 days"
+        }
+      ],
+      "gold_structure": []
+    },
+    {
+      "id": "statute_profile_promotes_no_blank_numbered_headings",
+      "structure_profile": "statute",
+      "text": "1 General duty\nbody\n2 Exceptions\nbody",
+      "required_kinds": [
+        "section",
+        "paragraph",
+        "sentence"
+      ],
+      "forbidden_kinds": [],
+      "gold_segments": [
+        {
+          "kind": "section",
+          "label": "1 General duty",
+          "anchor": "1 General duty"
+        },
+        {
+          "kind": "section",
+          "label": "2 Exceptions",
+          "anchor": "2 Exceptions"
+        }
+      ],
+      "gold_structure": [
+        {
+          "kind": "section",
+          "label": "1 General duty",
+          "start_anchor": "1 General duty",
+          "end_anchor": "2 Exceptions"
+        },
+        {
+          "kind": "section",
+          "label": "2 Exceptions",
+          "start_anchor": "2 Exceptions",
+          "end_anchor": "$END"
+        }
+      ]
+    }
+  ]
+}

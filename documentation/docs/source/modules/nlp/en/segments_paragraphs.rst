@@ -1,8 +1,8 @@
 .. _nlp_en_segments_paragraphs:
 
 ==================================================================
-:mod:`lexnlp.nlp.en.segments.pages`: Segmenting paragraphs in text
-==================================================================
+:mod:`lexnlp.nlp.en.segments.paragraphs`: Segmenting paragraphs in text
+=======================================================================
 
 The :mod:`lexnlp.nlp.en.segments.paragraphs` module contains methods for segmenting text
 into zero or more paragraphs.

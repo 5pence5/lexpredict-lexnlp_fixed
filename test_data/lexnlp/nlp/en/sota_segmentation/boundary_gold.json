@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "marker": "QUALITY_BLOB_RECONSTRUCTION_V3",
+  "description": "Complete exact-span hermetic regression gold; deliberately small and not population evidence.",
+  "matching": {
+    "unit": "half_open_character_span",
+    "tolerance_characters": 0,
+    "labels": "normalised"
+  },
+  "cases": [
+    {
+      "id": "legal_abbreviations_two_paragraphs",
+      "text": "The U.S. Borrower agreed. It paid £2.25.\n\nSecond paragraph has one sentence.",
+      "gold_spans": [
+        {
+          "kind": "paragraph",
+          "anchor": "The U.S. Borrower agreed. It paid £2.25."
+        },
+        {
+          "kind": "sentence",
+          "anchor": "The U.S. Borrower agreed."
+        },
+        {
+          "kind": "sentence",
+          "anchor": "It paid £2.25."
+        },
+        {
+          "kind": "paragraph",
+          "anchor": "Second paragraph has one sentence."
+        },
+        {
+          "kind": "sentence",
+          "anchor": "Second paragraph has one sentence."
+        }
+      ]
+    },
+    {
+      "id": "section_clause_and_list_boundaries",
+      "text": "1. SCOPE\n1.1 The Supplier shall perform.\n(a) first item;\n(b) second item.\n",
+      "gold_spans": [
+        {
+          "kind": "section",
+          "label": "1. SCOPE",
+          "start_anchor": "1. SCOPE",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "clause",
+          "label": "1.1",
+          "start_anchor": "1.1 The Supplier",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "list_item",
+          "label": "(a)",
+          "start_anchor": "(a) first item;",
+          "end_anchor": "(b) second item."
+        },
+        {
+          "kind": "list_item",
+          "label": "(b)",
+          "start_anchor": "(b) second item.",
+          "end_anchor": "$END"
+        },
+        {
+          "kind": "paragraph",
+          "anchor": "1. SCOPE\n"
+        },
+        {
+          "kind": "sentence",
+          "anchor": "1. SCOPE"
+        },
+        {
+          "kind": "paragraph",
+          "anchor": "1.1 The Supplier shall perform.\n"
+        },
+        {
+          "kind": "sentence",
+          "anchor": "1.1 The Supplier shall perform."
+        },
+        {
+          "kind": "paragraph",
+          "anchor": "(a) first item;\n"
+        },
+        {
+          "kind": "sentence",
+          "anchor": "(a) first item;"
+        },
+        {
+          "kind": "paragraph",
+          "anchor": "(b) second item.\n"
+        },
+        {
+          "kind": "sentence",
+          "anchor": "(b) second item."
+        }
+      ]
+    },
+    {
+      "id": "unicode_crlf_and_unterminated_final_line",
+      "text": "Café terms apply.\r\nEmoji 👩🏽‍⚖️ remains.\r\n\r\nFinal line has no terminator",
+      "gold_spans": [
+        {
+          "kind": "paragraph",
+          "anchor": "Café terms apply.\r\nEmoji 👩🏽‍⚖️ remains."
+        },
+        {
+          "kind": "sentence",
+          "anchor": "Café terms apply."
+        },
+        {
+          "kind": "sentence",
+          "anchor": "Emoji 👩🏽‍⚖️ remains."
+        },
+        {
+          "kind": "paragraph",
+          "anchor": "Final line has no terminator"
+        },
+        {
+          "kind": "sentence",
+          "anchor": "Final line has no terminator"
+        }
+      ]
+    }
+  ]
+}

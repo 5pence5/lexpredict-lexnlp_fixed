@@ -753,7 +753,7 @@ wheels = [
 
 [[package]]
 name = "lexnlp"
-version = "2.3.0"
+version = "2.4.0a1"
 source = { editable = "." }
 dependencies = [
     { name = "beautifulsoup4" },

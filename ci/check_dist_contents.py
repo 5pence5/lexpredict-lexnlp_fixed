@@ -39,6 +39,16 @@ BANNED_WHEEL_PREFIXES = (
     "scripts/",
 )
 
+REQUIRED_SEGMENTATION_SDIST_MEMBERS = (
+    "lexnlp/nlp/en/tests/segmentation_quality.py",
+    "scripts/segmentation_benchmark.py",
+    "scripts/segmentation_quality_gate.py",
+    "test_data/lexnlp/nlp/en/sota_segmentation/boundary_gold.json",
+    "test_data/lexnlp/nlp/en/sota_segmentation/legal_edge_cases.json",
+    "test_data/lexnlp/nlp/en/sota_segmentation/legacy_parity.json",
+    "test_data/lexnlp/nlp/en/sota_segmentation/retrieval_gold.json",
+)
+
 # These are the resource types loaded from the installed lexnlp package at
 # runtime. Keeping this list central makes newly added resources (including the
 # catalog release-asset manifest) part of the parity check automatically.
@@ -310,6 +320,15 @@ def validate_artifacts(dist_dir: Path, source_root: Path) -> int:
         else:
             names = list(iter_tar_names(artifact))
             resources = read_tar_resources(artifact)
+            normalised_names = tuple(name.replace("\\\\", "/") for name in names)
+            for required in REQUIRED_SEGMENTATION_SDIST_MEMBERS:
+                if not any(
+                    name == required or name.endswith(f"/{required}")
+                    for name in normalised_names
+                ):
+                    failures.append(
+                        f"{artifact.name}: missing segmentation gate source member: {required}"
+                    )
 
         for violation in find_violations(names):
             failures.append(f"{artifact.name}: forbidden file: {violation}")
