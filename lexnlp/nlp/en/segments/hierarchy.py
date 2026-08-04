@@ -421,10 +421,12 @@ _NUMERIC_HEADING_RE = re.compile(
     r"(?P<terminal>\.)?\s+(?P<title>\S.*?)\s*$"
 )
 _CLAUSE_RE = re.compile(
-    r"^\s*(?P<label>(?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+|\d+\.))\s+"
+    r"^\s*(?P<label>(?:[A-Z]\.\d+(?:\.\d+)*|\d+(?:\.\d+)+|\d+\.)"
+    r"(?:\([A-Za-z0-9ivxlcdm]+\))*)\s+",
+    re.IGNORECASE,
 )
 _LIST_RE = re.compile(
-    r"^\s*(?P<label>(?:\([A-Za-z0-9ivxlcdm]+\)|\d+\)))\s+",
+    r"^\s*(?P<label>(?:\([A-Za-z0-9ivxlcdm]+\)|\d+\)|•))\s+",
     re.IGNORECASE,
 )
 
@@ -458,6 +460,14 @@ def _number_parts(number: str) -> tuple[str, ...]:
 def _is_upper_heading(title: str) -> bool:
     letters = [character for character in title if character.isalpha()]
     return bool(letters) and all(not character.islower() for character in letters)
+
+
+def _is_initial_document_title(text: str) -> bool:
+    """Conservatively recognize a standalone all-caps legal document title."""
+    if len(text) > 200 or text.endswith((".", ":", ";", "?", "!")):
+        return False
+    words = re.findall(r"[^\W\d_]+", text, re.UNICODE)
+    return len(words) >= 2 and _is_upper_heading(text)
 
 
 def _ordinal(value: str) -> tuple[str, int] | None:
@@ -525,6 +535,10 @@ def _heading_candidates(
     numeric: list[_NumericCandidate] = []
     numeric_matches: dict[int, re.Match[str]] = {}
     explicit_matches: dict[int, re.Match[str]] = {}
+    first_content_index = next(
+        (line.index for line in lines if line.stripped),
+        None,
+    )
 
     for line in lines:
         if not line.stripped:
@@ -578,6 +592,24 @@ def _heading_candidates(
 
         match = numeric_matches.get(line.index)
         if match is None:
+            if (
+                line.index == first_content_index
+                and line.stripped.count("|") < 2
+                and line.content.count("\t") < 2
+                and _is_initial_document_title(line.stripped)
+            ):
+                headings.append(
+                    _Heading(
+                        line.index,
+                        line.start,
+                        line.content_end,
+                        line.stripped,
+                        "DOCUMENT_TITLE",
+                        None,
+                        (),
+                    )
+                )
+                heading_lines.add(line.index)
             continue
         title = match.group("title")
         if not _is_upper_heading(title) and line.index not in promoted:
@@ -700,7 +732,10 @@ def _outline_spans(
     sorted_sections = sorted(sections, key=lambda span: (span.start, -span.end))
     next_section = 0
     active_sections: list[StructuralSpan] = []
-    grouped: dict[tuple[int, int] | None, list[tuple[_Line, SegmentKind, str, int]]] = {}
+    grouped: dict[
+        tuple[int, int] | None,
+        list[tuple[int, _Line, SegmentKind, str, int]],
+    ] = {}
 
     for line in lines:
         while active_sections and active_sections[-1].end <= line.start:
@@ -729,15 +764,30 @@ def _outline_spans(
         base_level = (parent.level or 0) + 1 if parent else 1
 
         if list_match:
+            marker_offset = list_match.start("label")
+            marker_start = line.start + marker_offset
             grouped.setdefault(parent_key, []).append(
-                (line, SegmentKind.LIST_ITEM, list_match.group("label"), base_level + 1)
+                (
+                    marker_start,
+                    line,
+                    SegmentKind.LIST_ITEM,
+                    list_match.group("label"),
+                    base_level + 1 + marker_offset,
+                )
             )
         elif clause_match:
             label = clause_match.group("label")
+            marker_start = line.start + clause_match.start("label")
             parts = _number_parts(label)
             extra_depth = max(0, len(parts) - 2)
             grouped.setdefault(parent_key, []).append(
-                (line, SegmentKind.CLAUSE, label, base_level + extra_depth)
+                (
+                    marker_start,
+                    line,
+                    SegmentKind.CLAUSE,
+                    label,
+                    base_level + extra_depth,
+                )
             )
 
     result: list[StructuralSpan] = []
@@ -748,19 +798,19 @@ def _outline_spans(
         limit = len(text) if parent_key is None else parent_ends[parent_key]
         ends = [limit] * len(markers)
         stack: list[int] = []
-        for index, (line, _kind, _label_value, level) in enumerate(markers):
-            while stack and markers[stack[-1]][3] >= level:
-                ends[stack.pop()] = line.start
+        for index, (marker_start, _line, _kind, _label_value, level) in enumerate(markers):
+            while stack and markers[stack[-1]][4] >= level:
+                ends[stack.pop()] = marker_start
             stack.append(index)
         while stack:
             ends[stack.pop()] = limit
         for marker, end in zip(markers, ends):
-            line, kind, label_value, level = marker
-            if end > line.start:
+            marker_start, line, kind, label_value, level = marker
+            if end > marker_start:
                 result.append(
                     StructuralSpan(
                         kind,
-                        line.start,
+                        marker_start,
                         end,
                         label_value,
                         level,

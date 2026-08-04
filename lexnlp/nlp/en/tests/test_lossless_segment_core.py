@@ -1015,5 +1015,115 @@ class SecondCorrectiveCoreRegressionTests(unittest.TestCase):
         )
 
 
+class FinalCoreCorrectionTests(unittest.TestCase):
+    def options(self):
+        return {
+            "paragraph_segmenter": whole_paragraph,
+            "sentence_segmenter": whole_sentence,
+            "paragraph_backend_id": "tests.whole-paragraph.v1",
+            "sentence_backend_id": "tests.whole-sentence.v1",
+        }
+
+    def test_initial_all_caps_document_title_scopes_to_next_heading(self):
+        text = (
+            "MASTER SERVICES AGREEMENT\n"
+            "Preamble terms apply.\n"
+            "1. SCOPE\n"
+            "Operative body.\n"
+        )
+        hierarchy = segment_document(text, **self.options())
+        sections = list(hierarchy.segments(SegmentKind.SECTION))
+
+        self.assertEqual(hierarchy.reconstruct(), text)
+        self.assertEqual(
+            [section.label for section in sections],
+            ["MASTER SERVICES AGREEMENT", "1. SCOPE"],
+        )
+        self.assertEqual(sections[0].start, 0)
+        self.assertEqual(sections[0].end, sections[1].start)
+        self.assertEqual(sections[1].end, len(text))
+        self.assertIn(
+            ("heading_type", "DOCUMENT_TITLE"),
+            sections[0].attributes,
+        )
+
+    def test_parenthetical_decimal_clauses_are_detected(self):
+        text = (
+            "SECTION 4 TERMS\n"
+            "4.1(a) First obligation\n"
+            "4.2(a) Second obligation\n"
+        )
+        hierarchy = segment_document(text, **self.options())
+        clauses = list(hierarchy.segments(SegmentKind.CLAUSE))
+
+        self.assertEqual(hierarchy.reconstruct(), text)
+        self.assertEqual(
+            [clause.label for clause in clauses],
+            ["4.1(a)", "4.2(a)"],
+        )
+        self.assertEqual(clauses[0].start, text.index("4.1(a)"))
+        self.assertEqual(clauses[0].end, text.index("4.2(a)"))
+        self.assertEqual(clauses[1].end, len(text))
+
+    def test_indented_roman_and_bullet_lists_preserve_marker_offsets_and_nesting(self):
+        text = (
+            "SECTION 1 LISTS\n"
+            "(b) Parent\n"
+            "    (i) Child one\n"
+            "    (ii) Child two\n"
+            "(c) Next\n"
+            "• Bullet\n"
+        )
+        hierarchy = segment_document(text, **self.options())
+        items = list(hierarchy.segments(SegmentKind.LIST_ITEM))
+        by_label = {item.label: item for item in items}
+
+        self.assertEqual(hierarchy.reconstruct(), text)
+        self.assertEqual(
+            [item.label for item in items],
+            ["(b)", "(i)", "(ii)", "(c)", "•"],
+        )
+        self.assertEqual(by_label["(i)"].start, text.index("(i)"))
+        self.assertEqual(by_label["(ii)"].start, text.index("(ii)"))
+        self.assertEqual(by_label["(b)"].end, text.index("(c)"))
+        self.assertEqual(by_label["(i)"].end, text.index("(ii)"))
+        self.assertEqual(by_label["(ii)"].end, text.index("(c)"))
+        self.assertGreater(by_label["(i)"].level, by_label["(b)"].level)
+        self.assertGreater(by_label["(ii)"].level, by_label["(b)"].level)
+
+    def test_nonmonotonic_token_counter_keeps_known_feasible_hard_endpoint(self):
+        source = "aHxyz"
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (
+                Segment(SegmentKind.TEXT, 0, 1),
+                Segment(
+                    SegmentKind.SECTION,
+                    1,
+                    5,
+                    attributes=(("heading_end", "5"),),
+                ),
+            ),
+        )
+
+        def counter(text):
+            return 1 if text in {"aHx", "yz"} else 2
+
+        chunks = chunk_document(
+            hierarchy,
+            max_tokens=1,
+            token_counter=counter,
+            token_counter_id="tests.nonmonotonic.v1",
+            respect_boundaries=False,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+        )
+
+        self.assertEqual(
+            [(chunk.start, chunk.end, chunk.unit_count) for chunk in chunks],
+            [(0, 3, 1), (3, 5, 1)],
+        )
+        self.assertEqual(reconstruct_chunks(chunks), source)
+
+
 if __name__ == "__main__":
     unittest.main()

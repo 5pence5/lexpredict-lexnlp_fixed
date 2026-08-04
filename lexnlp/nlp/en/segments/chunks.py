@@ -744,10 +744,22 @@ def _token_end(
     raw = _raw_token_end(cache, context_start, fresh_start, limit, budget)
     if raw is None:
         return None
-    raw = headings.safe_hard_end(fresh_start, raw)
-    candidate = raw
+
+    # A heading boundary is advisory when using a caller-supplied token counter.
+    # An arbitrary counter need not be monotonic: shortening a feasible span can
+    # make it over budget.  Retain the known-feasible raw endpoint unless the
+    # adjusted heading-safe endpoint is independently feasible.
+    adjusted = headings.safe_hard_end(fresh_start, raw)
+    boundary_limit = raw
+    if (
+        adjusted > fresh_start
+        and cache.count(context_start, adjusted) <= budget
+    ):
+        boundary_limit = adjusted
+
+    candidate = boundary_limit
     if respect_boundaries:
-        position = bisect.bisect_right(boundaries, raw)
+        position = bisect.bisect_right(boundaries, boundary_limit)
         candidate = 0
         while position:
             position -= 1
@@ -761,7 +773,7 @@ def _token_end(
                 candidate = boundary
                 break
         if candidate == 0:
-            candidate = raw
+            candidate = boundary_limit
     count = cache.count(context_start, candidate)
     if count > budget or candidate <= fresh_start:
         return None
