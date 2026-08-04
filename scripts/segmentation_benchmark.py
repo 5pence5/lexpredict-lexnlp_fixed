@@ -2,10 +2,13 @@
 # QUALITY_BLOB_RECONSTRUCTION_V3
 """Operational performance gates for structure-first segmentation and chunking.
 
-Default modes exercise character and token budgets. The --statute-scaling option
-is a separate asymptotic lane designed to reject the historical O(n²)
-statute-heading candidate scan. It uses no model, corpus, network, or
-nondeterministic input.
+Character and lexical-token modes time end-to-end hierarchy plus chunk creation.
+The separate --statute-scaling lane builds each STATUTE hierarchy before the
+clock, then times chunk planning only. Every timed repeat must reconstruct the
+source and produce identical chunk counts and authenticated signatures. Scaling
+passes only when growth ratios, log-log exponent, determinism, and the
+largest-sample character-throughput floor all pass. No model, corpus, or network
+is used.
 """
 
 from __future__ import annotations
@@ -238,66 +241,91 @@ def run_statute_scaling_benchmark(
     repeat: int = 3,
     max_doubling_ratio: float = 3.2,
     max_growth_exponent: float = 1.7,
+    min_scaling_throughput: float = 10_000.0,
 ) -> dict[str, Any]:
-    """Operational STATUTE-profile asymptotic gate for the prior O(n²) defect."""
+    """Time repeatable chunk planning over prebuilt STATUTE hierarchies."""
 
     sizes = tuple(sizes)
     if len(sizes) < 3:
         raise ValueError("statute scaling requires at least three sizes")
-    if repeat <= 0:
-        raise ValueError("repeat must be positive")
+    if list(sizes) != sorted(sizes) or len(set(sizes)) != len(sizes):
+        raise ValueError("scaling sizes must be unique and increasing")
+    if any(isinstance(size, bool) or not isinstance(size, int) or size <= 0 for size in sizes):
+        raise ValueError("scaling sizes must be positive integers")
+    if isinstance(repeat, bool) or not isinstance(repeat, int) or repeat <= 0:
+        raise ValueError("repeat must be a positive integer")
+    if min_scaling_throughput <= 0:
+        raise ValueError("min_scaling_throughput must be positive")
+
     samples = []
     for heading_count in sizes:
         text = build_statute_scaling_document(heading_count)
-        warm = segment_document(
+        hierarchy = segment_document(
             text,
             sentence_segmenter=deterministic_sentence_spans,
             sentence_backend_id=SENTENCE_BACKEND_ID,
             structure_profile=StructureProfile.STATUTE,
         )
-        assert warm.reconstruct() == text
-        sections = list(warm.segments(SegmentKind.SECTION))
+        if hierarchy.reconstruct() != text:
+            raise AssertionError("prebuilt STATUTE hierarchy is not lossless")
+        sections = list(hierarchy.segments(SegmentKind.SECTION))
         if len(sections) != heading_count:
             raise AssertionError(
                 f"STATUTE profile detected {len(sections)} of {heading_count} headings"
             )
 
-        # Time chunk planning on the already-built STATUTE hierarchy. This is
-        # essential: the historical quadratic defect scanned all heading starts
-        # for every planned chunk and was invisible to hierarchy-only scaling.
+        # Hierarchy construction is deliberately outside the clock. This lane
+        # isolates the heading-index and protected-container chunk planner.
         observed = []
-        final_chunks = None
+        signatures = []
+        chunk_counts = []
         for _ in range(repeat):
             started = time.perf_counter()
-            final_chunks = chunk_document(
-                warm,
+            chunks = chunk_document(
+                hierarchy,
                 max_chars=256,
                 overlap_chars=0,
             )
-            observed.append(time.perf_counter() - started)
-        assert final_chunks is not None
-        assert "".join(
-            text[chunk.new_content_start:chunk.end] for chunk in final_chunks
-        ) == text
+            elapsed = time.perf_counter() - started
+            rebuilt = "".join(
+                text[chunk.new_content_start:chunk.end] for chunk in chunks
+            )
+            if rebuilt != text:
+                raise AssertionError("a timed STATUTE chunk repeat is not lossless")
+            observed.append(elapsed)
+            signatures.append(_chunk_signature(chunks))
+            chunk_counts.append(len(chunks))
+
+        median_seconds = statistics.median(observed)
+        characters_per_second = (
+            len(text) / median_seconds if median_seconds else math.inf
+        )
+        deterministic = (
+            len(set(signatures)) == 1 and len(set(chunk_counts)) == 1
+        )
         hierarchy_identity = hashlib.sha256(
             "\n".join(
                 f"{segment.start}:{segment.end}:{segment.label}:{segment.segment_id}"
                 for segment in sections
             ).encode("utf-8")
         ).hexdigest()
-        chunk_identity = _chunk_signature(final_chunks)
         samples.append(
             {
                 "heading_count": heading_count,
                 "characters": len(text),
                 "seconds": observed,
-                "median_seconds": statistics.median(observed),
+                "median_seconds": median_seconds,
+                "characters_per_second": characters_per_second,
                 "section_count": len(sections),
-                "chunk_count": len(final_chunks),
+                "chunk_counts": chunk_counts,
+                "chunk_signatures_sha256": signatures,
+                "chunk_count": chunk_counts[0],
+                "chunk_identity_sha256": signatures[0],
                 "hierarchy_identity_sha256": hierarchy_identity,
-                "chunk_identity_sha256": chunk_identity,
+                "deterministic": deterministic,
             }
         )
+
     medians = [sample["median_seconds"] for sample in samples]
     classification = evaluate_scaling_samples(
         sizes,
@@ -305,26 +333,59 @@ def run_statute_scaling_benchmark(
         max_doubling_ratio=max_doubling_ratio,
         max_growth_exponent=max_growth_exponent,
     )
+    failures = list(classification["failures"])
+    for sample in samples:
+        if not sample["deterministic"]:
+            failures.append(
+                {
+                    "check": "deterministic_statute_chunk_identity",
+                    "heading_count": sample["heading_count"],
+                    "chunk_counts": sample["chunk_counts"],
+                    "chunk_signatures_sha256": sample["chunk_signatures_sha256"],
+                }
+            )
+
+    largest = samples[-1]
+    if largest["characters_per_second"] < min_scaling_throughput:
+        failures.append(
+            {
+                "check": "largest_sample_throughput_characters_per_second",
+                "heading_count": largest["heading_count"],
+                "observed": largest["characters_per_second"],
+                "minimum": min_scaling_throughput,
+            }
+        )
+
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
-        "scope": "hermetic-statute-profile-chunk-planning-asymptotic-regression",
+        "scope": "hermetic-statute-profile-prebuilt-hierarchy-chunk-planning",
         "profile": StructureProfile.STATUTE.value,
-        "passed": classification["passed"],
-        "failures": classification["failures"],
+        "passed": not failures,
+        "failures": failures,
         "configuration": {
             "sizes": list(sizes),
             "repeat": repeat,
             "max_doubling_ratio": max_doubling_ratio,
             "max_growth_exponent": max_growth_exponent,
+            "min_scaling_throughput": min_scaling_throughput,
             "sentence_backend_id": SENTENCE_BACKEND_ID,
             "chunk_max_chars": 256,
         },
         "samples": samples,
         "analysis": {
-            key: value for key, value in classification.items() if key not in {"passed", "failures"}
+            **{
+                key: value
+                for key, value in classification.items()
+                if key not in {"passed", "failures"}
+            },
+            "all_repeat_outputs_deterministic": all(
+                sample["deterministic"] for sample in samples
+            ),
+            "largest_sample_characters_per_second": largest[
+                "characters_per_second"
+            ],
         },
     }
-
 
 def _sizes(value: str) -> tuple[int, ...]:
     try:
@@ -353,6 +414,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--scaling-repeat", type=int, default=3)
     parser.add_argument("--max-scaling-doubling-ratio", type=float, default=3.2)
     parser.add_argument("--max-scaling-exponent", type=float, default=1.7)
+    parser.add_argument("--min-scaling-throughput", type=float, default=10_000.0)
     return parser
 
 
@@ -364,6 +426,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             repeat=args.scaling_repeat,
             max_doubling_ratio=args.max_scaling_doubling_ratio,
             max_growth_exponent=args.max_scaling_exponent,
+            min_scaling_throughput=args.min_scaling_throughput,
         )
     else:
         report = run_benchmark(

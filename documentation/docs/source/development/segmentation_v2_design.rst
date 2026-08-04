@@ -222,22 +222,29 @@ Operational evidence
 
 The character gate runs a deterministic 200,000-character legal-like document
 three times with 1,000-character chunks and 100-character overlap.  Defaults
-require at least 5,000 characters/second and at most 256 MiB of Python memory
-traced by `tracemalloc`.  CI separately exercises a 100,000-character lexical
-token lane.
+and CI require at least 10,000 characters/second and at most 64 MiB of Python
+memory traced by `tracemalloc`.  CI separately exercises a
+100,000-character lexical-token lane with the same floor and ceiling.
 
 A final integration run observed about 31,364 characters/second and 8.71 MiB
 traced peak for character mode, and 30,454 characters/second and 4.45 MiB for
 token mode.  These are environment-specific regression observations, not a
 service objective, RSS measurement or external-backend comparison.
 
-Statute scaling is a separate required lane.  It must generate an increasing
-sequence of numbered statute headings (including thousands of candidates), run
-`StructureProfile.STATUTE`, assert deterministic/lossless output and gate both
-absolute throughput and growth ratios.  The conservative 200k benchmark cannot
-stand in for this adversarial profile: an all-pairs heading algorithm can look
-fast on conservative text while becoming quadratic on a much smaller statute.
-Retain this lane in CI whenever statute detection changes.
+Statute scaling is a separate required lane.  It generates an increasing
+sequence of numbered statute headings (including thousands of candidates) with
+`StructureProfile.STATUTE`.  Hierarchy construction and validation occur before
+the clock; every timed repeat measures only chunk planning over that prebuilt
+hierarchy, reconstructs the exact source, and records the complete chunk count
+and authenticated signature.  A sample is invalid if repeat counts or
+signatures differ.  The report records characters/second for every sample and
+requires the largest sample to meet `--min-scaling-throughput 10000`, in
+addition to the adjacent-ratio and log-log-exponent gates.
+
+The conservative 200k benchmark cannot stand in for this adversarial profile:
+an all-pairs heading algorithm can look fast on conservative text while
+becoming quadratic on a much smaller statute.  Retain this lane in CI whenever
+statute detection or structure-aware chunk planning changes.
 
 External evaluation methodology
 -------------------------------

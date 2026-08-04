@@ -197,8 +197,11 @@ def deterministic_sentence_spans(text: str) -> list[tuple[int, int]]:
         start = begin + cursor
         while start < finish and text[start].isspace():
             start += 1
-        if start < finish:
-            result.append((start, finish))
+        end = finish
+        while end > start and text[end - 1].isspace():
+            end -= 1
+        if start < end:
+            result.append((start, end))
     return result
 
 
