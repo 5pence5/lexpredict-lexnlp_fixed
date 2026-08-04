@@ -162,6 +162,7 @@ def anchor_recall(text: str, gold_items: Sequence[Mapping[str, Any]], document: 
 
 _SENTENCE_END = re.compile(r"[.!?](?:[\"'”’)\]]+)?(?=\s+|$)")
 _PROTECTED_PERIOD = re.compile(r"(?i)\b(?:u\.s|u\.k|no|s|p|v|vs|dr|mr|mrs|ms|ltd|inc|corp|p\.a)\.$")
+_OUTLINE_MARKER_PERIOD = re.compile(r"^\d+\.$")
 
 
 def deterministic_sentence_spans(text: str) -> list[tuple[int, int]]:
@@ -180,7 +181,11 @@ def deterministic_sentence_spans(text: str) -> list[tuple[int, int]]:
         cursor = 0
         for match in _SENTENCE_END.finditer(local):
             candidate = local[cursor:match.end()]
-            if _PROTECTED_PERIOD.search(candidate.rstrip()):
+            stripped_candidate = candidate.strip()
+            if (
+                _PROTECTED_PERIOD.search(stripped_candidate)
+                or _OUTLINE_MARKER_PERIOD.fullmatch(stripped_candidate)
+            ):
                 continue
             start = begin + cursor
             while start < begin + match.end() and text[start].isspace():

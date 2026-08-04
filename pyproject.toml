@@ -102,6 +102,9 @@ audit = [
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.exclude-package-data]
+"*" = ["tests/*"]
+
 [tool.setuptools.packages.find]
 include = ["lexnlp*"]
 exclude = ["*tests*"]

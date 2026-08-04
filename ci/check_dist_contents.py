@@ -100,12 +100,24 @@ def is_runtime_resource(name: str) -> bool:
 def normalise_package_name(name: str) -> str | None:
     """Return an archive member as a path rooted at ``lexnlp/``."""
     parts = PurePosixPath(name.replace("\\", "/")).parts
-    try:
-        package_index = parts.index("lexnlp")
-    except ValueError:
+    if parts and parts[0] == "lexnlp":
+        package_index = 0
+    elif (
+        len(parts) > 1
+        and parts[1] == "lexnlp"
+        and parts[0].startswith("lexnlp-")
+    ):
+        package_index = 1
+    else:
         return None
     normalised = "/".join(parts[package_index:])
     return normalised if is_runtime_resource(normalised) else None
+
+
+def is_forbidden_wheel_member(name: str) -> bool:
+    normalised = name.replace("\\", "/")
+    parts = PurePosixPath(normalised).parts
+    return normalised.startswith(BANNED_WHEEL_PREFIXES) or "tests" in parts
 
 
 def iter_tar_names(path: Path) -> Iterable[str]:
@@ -313,7 +325,7 @@ def validate_artifacts(dist_dir: Path, source_root: Path) -> int:
             resources = read_zip_resources(artifact)
             for name in names:
                 normalised = name.replace("\\", "/")
-                if normalised.startswith(BANNED_WHEEL_PREFIXES):
+                if is_forbidden_wheel_member(normalised):
                     failures.append(
                         f"{artifact.name}: non-package file in wheel: {normalised}"
                     )

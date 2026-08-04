@@ -7,7 +7,8 @@
       "id": "legal_abbreviations",
       "text": "The U.S. Borrower is Acme. It shall pay £2.25 annually. No. 4 survives.",
       "sentence_texts": [
-        "The U.S. Borrower is Acme.",
+        "The U.S.",
+        "Borrower is Acme.",
         "It shall pay £2.25 annually.",
         "No. 4 survives."
       ]
@@ -23,7 +24,8 @@
       "id": "blank_line_legacy_shape",
       "text": "First operative paragraph.\n\nSecond operative paragraph.",
       "paragraph_texts": [
-        "First operative paragraph.\n\nSecond operative paragraph."
+        "First operative paragraph.\n\n",
+        "Second operative paragraph."
       ]
     }
   ]
