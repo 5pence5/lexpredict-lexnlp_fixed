@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import dis
 import hashlib
 import statistics
 import time
 import unittest
 from dataclasses import replace
 
+from lexnlp.nlp.en.segments import chunks as chunks_core
 from lexnlp.nlp.en.segments import hierarchy as hierarchy_core
 from lexnlp.nlp.en.segments.hierarchy import (
     DocumentHierarchy,
@@ -957,6 +959,59 @@ class CorrectiveCoreRegressionTests(unittest.TestCase):
             large_time / max(small_time, 1e-6),
             6.0,
             (small_time, large_time),
+        )
+
+
+class SecondCorrectiveCoreRegressionTests(unittest.TestCase):
+    def options(self):
+        return {
+            "paragraph_segmenter": whole_paragraph,
+            "sentence_segmenter": whole_sentence,
+            "paragraph_backend_id": "tests.whole-paragraph.v1",
+            "sentence_backend_id": "tests.whole-sentence.v1",
+        }
+
+    def test_uppercase_table_row_cannot_become_crossing_heading(self):
+        text = "1. INTRODUCTION\na | b | c\n2. | D | E\n"
+        hierarchy = segment_document(text, **self.options())
+
+        self.assertEqual(hierarchy.reconstruct(), text)
+        self.assertEqual(
+            [node.label for node in hierarchy.segments(SegmentKind.SECTION)],
+            ["1. INTRODUCTION"],
+        )
+        tables = list(hierarchy.segments(SegmentKind.TABLE))
+        self.assertEqual(len(tables), 1)
+        self.assertEqual(hierarchy.text(tables[0]), "a | b | c\n2. | D | E\n")
+
+    def test_zero_width_overlap_has_no_overlap_provenance(self):
+        chunks = chunk_document(
+            "abcdef",
+            max_chars=3,
+            overlap_chars=0,
+            respect_boundaries=False,
+            **self.options(),
+        )
+        self.assertEqual(len(chunks), 2)
+        second = chunks[1]
+        self.assertEqual(second.overlap_span, (3, 3))
+        self.assertEqual(second.overlap_char_count, 0)
+        self.assertEqual(second.overlap_provenance.segments, ())
+        self.assertEqual(second.context_provenance.segments, ())
+        self.assertTrue(second.provenance.segments)
+        self.assertTrue(second.content_provenance.segments)
+        self.assertEqual(reconstruct_chunks(chunks), "abcdef")
+
+    def test_provenance_walker_does_not_slice_remaining_siblings(self):
+        opnames = {
+            instruction.opname
+            for instruction in dis.get_instructions(
+                chunks_core._HierarchyIndex.references
+            )
+        }
+        self.assertTrue(
+            {"BUILD_SLICE", "BINARY_SLICE"}.isdisjoint(opnames),
+            opnames,
         )
 
 

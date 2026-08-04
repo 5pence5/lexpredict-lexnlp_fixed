@@ -487,12 +487,14 @@ class _HierarchyIndex:
                 continue
             child_ends = self._child_ends[id(node)]
             first = bisect.bisect_right(child_ends, start)
-            selected: list[Segment] = []
-            for child in node.children[first:]:
-                if child.start >= end:
-                    break
-                selected.append(child)
-            stack.extend(reversed(selected))
+            stop = first
+            while stop < len(node.children) and node.children[stop].start < end:
+                stop += 1
+            # Push only the intersecting index range in reverse preorder.
+            # Slicing node.children[first:] copies every later sibling and
+            # becomes quadratic across thousands of narrow chunks.
+            for child_index in range(stop - 1, first - 1, -1):
+                stack.append(node.children[child_index])
         return tuple(result)
 
 
@@ -778,10 +780,14 @@ def _provenance_for(
         for reference in full_references
         if reference.end > new_content_start and reference.start < end
     )
-    overlap_references = tuple(
-        reference
-        for reference in full_references
-        if reference.end > start and reference.start < new_content_start
+    overlap_references = (
+        ()
+        if start == new_content_start
+        else tuple(
+            reference
+            for reference in full_references
+            if reference.end > start and reference.start < new_content_start
+        )
     )
     return (
         ChunkProvenance(full_references),

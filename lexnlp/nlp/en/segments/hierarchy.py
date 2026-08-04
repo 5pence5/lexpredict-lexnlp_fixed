@@ -529,6 +529,11 @@ def _heading_candidates(
     for line in lines:
         if not line.stripped:
             continue
+        # Delimited rows belong to table evidence.  A leading cell such as
+        # "2." or "SECTION 2" must not also become a heading whose scope
+        # crosses the surrounding table block.
+        if line.stripped.count("|") >= 2 or line.content.count("\t") >= 2:
+            continue
         explicit = _EXPLICIT_HEADING_RE.match(line.content)
         if explicit:
             explicit_matches[line.index] = explicit
