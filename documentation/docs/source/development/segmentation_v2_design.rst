@@ -134,7 +134,8 @@ Optional challengers
 
 `Segment Any Text (SaT)`
     The EMNLP paper evaluates punctuation-robust multilingual segmentation,
-    including legal-domain experiments [Frohmann2024]_.  LexNLP's adapter
+    including legal-domain experiments [Frohmann2024]_.  The reference
+    implementation is published as ``wtpsplit`` [SaT]_.  LexNLP's adapter
     accepts a caller-created model, requires a pinned backend/config ID, does
     not download weights and rejects non-lossless output.  It currently runs
     per paragraph rather than through upstream multi-document batching.  It is
@@ -192,7 +193,8 @@ The final frozen fixture run matched 34/34 partial anchors across conservative
 and statute profiles.  Exact true positives were 1 section, 1 clause, 2 list
 items, 8 paragraphs and 10 sentences, with no false positives or negatives.
 Lexical retrieval MRR was 0.8333, character recall@3 1.0 and context
-precision@1 0.5531.  Mean chunk length was 90.55 and amplification 1.0143.
+precision@1 0.4810 (exactly 0.48098916194431673).  Mean chunk length was
+90.55 and amplification 1.0143.
 
 These values come from hermetic, synthetic fixtures: only eight edge cases
 (1,351 characters), three complete-boundary cases (221 characters), and two

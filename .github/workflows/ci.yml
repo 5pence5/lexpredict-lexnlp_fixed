@@ -598,14 +598,197 @@ jobs:
           uv build --out-dir "${RUNNER_TEMP}/dist-second"
           python - <<'PY'
           from pathlib import Path
+          import gzip
           import hashlib
+          import io
           import json
           import os
           import shutil
+          import struct
+          import tarfile
+          import tempfile
 
           runner_temp = Path(os.environ["RUNNER_TEMP"])
+          epoch = int(os.environ["SOURCE_DATE_EPOCH"])
           first_root = runner_temp / "dist-first"
           second_root = runner_temp / "dist-second"
+          volatile_pax_keys = {
+              "atime",
+              "ctime",
+              "gid",
+              "gname",
+              "mtime",
+              "uid",
+              "uname",
+          }
+
+          def read_regular(archive, member, archive_path):
+              stream = archive.extractfile(member)
+              if stream is None:
+                  raise SystemExit(
+                      f"{archive_path}: missing payload for {member.name!r}"
+                  )
+              with stream:
+                  payload = stream.read(member.size + 1)
+              if len(payload) != member.size:
+                  raise SystemExit(
+                      f"{archive_path}: truncated payload for {member.name!r}: "
+                      f"expected {member.size}, read {len(payload)}"
+                  )
+              return payload
+
+          def member_evidence(member, payload):
+              return (
+                  member.type,
+                  member.mode,
+                  member.linkname,
+                  member.devmajor,
+                  member.devminor,
+                  member.size,
+                  None if payload is None else hashlib.sha256(payload).hexdigest(),
+              )
+
+          def canonicalise_sdist(path):
+              entries = []
+              expected = {}
+              seen = set()
+              try:
+                  with tarfile.open(path, "r:gz", errorlevel=2) as source:
+                      for member in source:
+                          if member.name in seen:
+                              raise SystemExit(
+                                  f"{path}: duplicate tar member {member.name!r}"
+                              )
+                          seen.add(member.name)
+                          payload = (
+                              read_regular(source, member, path)
+                              if member.isreg()
+                              else None
+                          )
+                          expected[member.name] = member_evidence(member, payload)
+                          entries.append((member, payload))
+              except (EOFError, OSError, tarfile.TarError) as error:
+                  raise SystemExit(f"{path}: unreadable or truncated sdist: {error}")
+
+              entries.sort(key=lambda item: item[0].name)
+              temporary_handle = tempfile.NamedTemporaryFile(
+                  mode="wb",
+                  prefix=path.name + ".",
+                  suffix=".canonical",
+                  dir=path.parent,
+                  delete=False,
+              )
+              temporary = Path(temporary_handle.name)
+              temporary_handle.close()
+              try:
+                  with temporary.open("wb") as raw:
+                      with gzip.GzipFile(
+                          filename="",
+                          mode="wb",
+                          compresslevel=9,
+                          fileobj=raw,
+                          mtime=epoch,
+                      ) as compressed:
+                          with tarfile.open(
+                              fileobj=compressed,
+                              mode="w|",
+                              format=tarfile.PAX_FORMAT,
+                              pax_headers={},
+                          ) as target:
+                              for member, payload in entries:
+                                  canonical = tarfile.TarInfo(member.name)
+                                  canonical.type = member.type
+                                  canonical.mode = member.mode
+                                  canonical.linkname = member.linkname
+                                  canonical.devmajor = member.devmajor
+                                  canonical.devminor = member.devminor
+                                  canonical.size = member.size
+                                  canonical.uid = 0
+                                  canonical.gid = 0
+                                  canonical.uname = ""
+                                  canonical.gname = ""
+                                  canonical.mtime = epoch
+                                  canonical.pax_headers = {}
+                                  target.addfile(
+                                      canonical,
+                                      None if payload is None else io.BytesIO(payload),
+                                  )
+
+                  raw_header = temporary.read_bytes()[:10]
+                  if (
+                      len(raw_header) != 10
+                      or raw_header[:2] != b"\x1f\x8b"
+                      or raw_header[3] & 0x08
+                      or struct.unpack("<I", raw_header[4:8])[0] != epoch
+                  ):
+                      raise SystemExit(
+                          f"{path}: canonical gzip header is not deterministic"
+                      )
+
+                  actual_names = []
+                  actual_seen = set()
+                  with tarfile.open(temporary, "r:gz", errorlevel=2) as check:
+                      for member in check:
+                          if member.name in actual_seen:
+                              raise SystemExit(
+                                  f"{path}: duplicate canonical member "
+                                  f"{member.name!r}"
+                              )
+                          actual_seen.add(member.name)
+                          actual_names.append(member.name)
+                          payload = (
+                              read_regular(check, member, temporary)
+                              if member.isreg()
+                              else None
+                          )
+                          if member.name not in expected:
+                              raise SystemExit(
+                                  f"{path}: unexpected canonical member "
+                                  f"{member.name!r}"
+                              )
+                          if member_evidence(member, payload) != expected[member.name]:
+                              raise SystemExit(
+                                  f"{path}: canonicalisation changed "
+                                  f"{member.name!r}"
+                              )
+                          if (
+                              member.uid != 0
+                              or member.gid != 0
+                              or member.uname
+                              or member.gname
+                              or member.mtime != epoch
+                          ):
+                              raise SystemExit(
+                                  f"{path}: non-canonical ownership or timestamp "
+                                  f"for {member.name!r}"
+                              )
+                          volatile = volatile_pax_keys.intersection(
+                              member.pax_headers
+                          )
+                          if volatile:
+                              raise SystemExit(
+                                  f"{path}: volatile pax metadata for "
+                                  f"{member.name!r}: {sorted(volatile)}"
+                              )
+                  if actual_names != sorted(expected):
+                      raise SystemExit(
+                          f"{path}: canonical members are not sorted exactly"
+                      )
+                  os.replace(temporary, path)
+              finally:
+                  temporary.unlink(missing_ok=True)
+
+          def exactly_one_sdist(root):
+              sdists = sorted(root.glob("*.tar.gz"))
+              if len(sdists) != 1:
+                  raise SystemExit(
+                      f"{root}: expected exactly one sdist; "
+                      f"found {[path.name for path in sdists]}"
+                  )
+              return sdists[0]
+
+          canonicalise_sdist(exactly_one_sdist(first_root))
+          canonicalise_sdist(exactly_one_sdist(second_root))
 
           def artifact_hashes(root):
               files = sorted(
@@ -632,7 +815,7 @@ jobs:
           second = artifact_hashes(second_root)
           if first != second:
               raise SystemExit(
-                  "reproducible build mismatch:\n"
+                  "reproducible canonical build mismatch:\n"
                   + json.dumps(
                       {"first": first, "second": second},
                       indent=2,

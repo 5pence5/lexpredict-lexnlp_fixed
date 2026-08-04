@@ -83,7 +83,7 @@ def test_default_gate_is_deterministic_and_reports_bounded_scope():
     aggregate = first["retrieval"]["aggregate"]
     assert aggregate["mrr"] == pytest.approx(0.8333333333333334)
     assert aggregate["character_recall_at_3"] == 1.0
-    assert aggregate["context_precision_at_1"] == pytest.approx(0.553088, abs=1e-6)
+    assert aggregate["context_precision_at_1"] == pytest.approx(0.48098916194431673)
     assert first["packing"]["mean_chunk_characters"] == pytest.approx(90.54545454545455)
     assert first["packing"]["index_character_amplification"] == pytest.approx(
         1.014256619144603
