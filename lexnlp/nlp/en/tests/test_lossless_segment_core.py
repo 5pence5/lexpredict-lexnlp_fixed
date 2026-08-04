@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import statistics
 import time
 import unittest
+from dataclasses import replace
 
 from lexnlp.nlp.en.segments import hierarchy as hierarchy_core
 from lexnlp.nlp.en.segments.hierarchy import (
@@ -16,6 +18,16 @@ from lexnlp.nlp.en.segments.hierarchy import (
     StructuralSpan,
     StructureProfile,
     segment_document,
+)
+
+from lexnlp.nlp.en.segments.chunks import (
+    ChunkProvenance,
+    ContainerPolicy,
+    SegmentReference,
+    chunk_document,
+    compute_chunk_metadata_sha256,
+    compute_provenance_sha256,
+    reconstruct_chunks,
 )
 
 
@@ -353,6 +365,330 @@ class StatuteSequenceScalingTests(unittest.TestCase):
             6.0,
             (small_time, large_time),
         )
+
+
+class LosslessChunkTests(unittest.TestCase):
+    def options(self):
+        return {
+            "paragraph_segmenter": whole_paragraph,
+            "sentence_segmenter": whole_sentence,
+            "paragraph_backend_id": "tests.whole-paragraph.v1",
+            "sentence_backend_id": "tests.whole-sentence.v1",
+        }
+
+    def test_default_character_budget_hard_splits_oversized_atomic_text(self):
+        chunks = chunk_document(
+            "x" * 9001,
+            respect_boundaries=False,
+            **self.options(),
+        )
+        self.assertEqual([len(chunk.text) for chunk in chunks], [4000, 4000, 1001])
+        self.assertTrue(all(chunk.unit_count == len(chunk.text) for chunk in chunks))
+        self.assertEqual(reconstruct_chunks(chunks), "x" * 9001)
+
+    def test_character_overlap_is_exact_and_reconstructs_fresh_content_once(self):
+        text = "abcdefghij"
+        chunks = chunk_document(
+            text,
+            max_chars=5,
+            overlap_chars=2,
+            respect_boundaries=False,
+            document_id="doc-1",
+            **self.options(),
+        )
+        self.assertEqual(
+            [(chunk.start, chunk.new_content_start, chunk.end) for chunk in chunks],
+            [(0, 0, 5), (3, 5, 8), (6, 8, 10)],
+        )
+        self.assertEqual([chunk.unit_count for chunk in chunks], [5, 5, 4])
+        self.assertEqual(reconstruct_chunks(chunks), text)
+        self.assertEqual(len({chunk.chunk_id for chunk in chunks}), len(chunks))
+        self.assertTrue(
+            all(chunk.manifest.source_id.startswith("doc-1@sha256:") for chunk in chunks)
+        )
+
+    def test_preserve_policy_never_packs_complete_section_siblings(self):
+        text = (
+            "1. FIRST\nAlpha applies.\n\n"
+            "2. SECOND\nBeta applies.\n\n"
+            "3. THIRD\nGamma applies."
+        )
+        expected = [(0, 25), (25, 50), (50, 73)]
+        for budget in (30, 60, 100):
+            with self.subTest(budget=budget):
+                chunks = chunk_document(
+                    text,
+                    max_chars=budget,
+                    overlap_chars=5 if budget == 30 else 0,
+                    **self.options(),
+                )
+                self.assertEqual(
+                    [(chunk.start, chunk.end) for chunk in chunks],
+                    expected,
+                )
+                self.assertEqual(
+                    [chunk.new_content_start for chunk in chunks],
+                    [0, 25, 50],
+                )
+                self.assertEqual(reconstruct_chunks(chunks), text)
+        packed = chunk_document(
+            text,
+            max_chars=100,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+            **self.options(),
+        )
+        self.assertEqual([(chunk.start, chunk.end) for chunk in packed], [(0, 73)])
+
+    def test_overlap_provenance_distinguishes_context_from_primary_section(self):
+        text = (
+            "1. FIRST\nAlpha applies.\n\n"
+            "2. SECOND\nBeta applies.\n\n"
+            "3. THIRD\nGamma applies."
+        )
+        chunks = chunk_document(
+            text,
+            max_chars=30,
+            overlap_chars=5,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+            **self.options(),
+        )
+        second = chunks[1]
+        self.assertEqual(second.start, 20)
+        self.assertEqual(second.new_content_start, 25)
+        self.assertEqual(second.content_provenance.section_labels, ("2. SECOND",))
+        self.assertEqual(second.overlap_provenance.section_labels, ("1. FIRST",))
+        self.assertEqual(
+            second.provenance.section_labels,
+            ("1. FIRST", "2. SECOND"),
+        )
+        self.assertIs(second.context_provenance, second.overlap_provenance)
+
+    def test_token_mode_requires_explicit_counter_and_identity(self):
+        with self.assertRaisesRegex(ValueError, "explicit token_counter"):
+            chunk_document("abcdef", max_tokens=2, **self.options())
+        with self.assertRaisesRegex(ValueError, "require max_tokens"):
+            chunk_document(
+                "abcdef",
+                max_chars=2,
+                token_counter=len,
+                token_counter_id="tests.len.v1",
+                **self.options(),
+            )
+        with self.assertRaisesRegex(ValueError, "token_counter_id"):
+            chunk_document(
+                "abcdef",
+                max_tokens=2,
+                token_counter=len,
+                **self.options(),
+            )
+        chunks = chunk_document(
+            "abcdefghij",
+            max_tokens=4,
+            token_counter=len,
+            token_counter_id="tests.len.v1",
+            respect_boundaries=False,
+            **self.options(),
+        )
+        self.assertEqual([chunk.unit_count for chunk in chunks], [4, 4, 2])
+        self.assertEqual(reconstruct_chunks(chunks), "abcdefghij")
+
+    def test_non_monotonic_black_box_counter_still_obeys_strict_budget(self):
+        def non_monotonic(text):
+            return 1 if len(text) % 5 == 0 else len(text)
+
+        source = "abcdefghijklmnopq"
+        chunks = chunk_document(
+            source,
+            max_tokens=2,
+            token_counter=non_monotonic,
+            token_counter_id="tests.non-monotonic.v1",
+            respect_boundaries=False,
+            **self.options(),
+        )
+        self.assertTrue(chunks)
+        self.assertTrue(all(chunk.unit_count <= 2 for chunk in chunks))
+        self.assertEqual(reconstruct_chunks(chunks), source)
+
+    def test_token_counter_work_is_near_linear_and_cache_is_per_chunk(self):
+        calls = 0
+        counted_characters = 0
+
+        def measured_len(text):
+            nonlocal calls, counted_characters
+            calls += 1
+            counted_characters += len(text)
+            return len(text)
+
+        source = "a" * 100000
+        chunks = chunk_document(
+            source,
+            max_tokens=100,
+            token_counter=measured_len,
+            token_counter_id="tests.measured-len.v1",
+            respect_boundaries=False,
+            **self.options(),
+        )
+        self.assertEqual(len(chunks), 1000)
+        self.assertLess(calls, 25000)
+        self.assertLess(counted_characters, len(source) * 20)
+        self.assertEqual(reconstruct_chunks(chunks), source)
+
+    def test_layout_attributes_survive_into_chunk_references(self):
+        text = "name | value\nA | 1\n"
+        table = StructuralSpan(
+            SegmentKind.TABLE,
+            0,
+            len(text),
+            attributes=(("page", "7"), ("bbox", "1,2,3,4")),
+        )
+        chunk = chunk_document(
+            text,
+            max_chars=100,
+            structural_spans=(table,),
+            structural_backend_id="tests.layout.v1",
+            **self.options(),
+        )[0]
+        reference = next(
+            item
+            for item in chunk.provenance.segments
+            if item.kind is SegmentKind.TABLE
+        )
+        self.assertEqual(reference.attributes, table.attributes)
+        self.assertIn(reference, chunk.content_provenance.segments)
+
+    def test_manifest_and_chunk_ids_cover_source_tree_and_configuration(self):
+        text = "operative text"
+        char_four = chunk_document(
+            text,
+            max_chars=4,
+            respect_boundaries=False,
+            document_id="contract",
+            **self.options(),
+        )[0]
+        char_five = chunk_document(
+            text,
+            max_chars=5,
+            respect_boundaries=False,
+            document_id="contract",
+            **self.options(),
+        )[0]
+        revised = chunk_document(
+            "operative text revised",
+            max_chars=4,
+            respect_boundaries=False,
+            document_id="contract",
+            **self.options(),
+        )[0]
+        self.assertNotEqual(char_four.manifest.manifest_id, char_five.manifest.manifest_id)
+        self.assertNotEqual(char_four.chunk_id, char_five.chunk_id)
+        self.assertNotEqual(char_four.manifest.source_id, revised.manifest.source_id)
+
+        section = chunk_document(
+            text,
+            max_chars=100,
+            structural_spans=(StructuralSpan(SegmentKind.SECTION, 0, len(text)),),
+            structural_backend_id="tests.layout.v1",
+            **self.options(),
+        )[0]
+        table = chunk_document(
+            text,
+            max_chars=100,
+            structural_spans=(StructuralSpan(SegmentKind.TABLE, 0, len(text)),),
+            structural_backend_id="tests.layout.v1",
+            **self.options(),
+        )[0]
+        self.assertNotEqual(section.manifest.manifest_id, table.manifest.manifest_id)
+        self.assertNotEqual(section.chunk_id, table.chunk_id)
+
+    def test_text_digest_authenticates_overlap_only_bytes_and_changes_id(self):
+        chunks = chunk_document(
+            "abcdefghij",
+            max_chars=5,
+            overlap_chars=2,
+            respect_boundaries=False,
+            **self.options(),
+        )
+        original = chunks[1]
+        mutated_text = "X" + original.text[1:]
+        mutated_text_sha = hashlib.sha256(
+            mutated_text.encode("utf-8", "surrogatepass")
+        ).hexdigest()
+        with self.assertRaisesRegex(ValueError, "chunk metadata"):
+            replace(
+                original,
+                text=mutated_text,
+                text_sha256=mutated_text_sha,
+            )
+        new_metadata = compute_chunk_metadata_sha256(
+            manifest=original.manifest,
+            index=original.index,
+            start=original.start,
+            end=original.end,
+            new_content_start=original.new_content_start,
+            unit_count=original.unit_count,
+            text_sha256=mutated_text_sha,
+            provenance_sha256=original.provenance_sha256,
+        )
+        authenticated = replace(
+            original,
+            text=mutated_text,
+            text_sha256=mutated_text_sha,
+            chunk_metadata_sha256=new_metadata,
+        )
+        self.assertNotEqual(authenticated.chunk_id, original.chunk_id)
+        self.assertEqual(authenticated.content, original.content)
+
+    def test_provenance_digest_rejects_stale_fabrication_and_changes_id(self):
+        original = chunk_document(
+            "abcdefghij",
+            max_chars=5,
+            overlap_chars=2,
+            respect_boundaries=False,
+            **self.options(),
+        )[1]
+        fake = SegmentReference("text:0:1", SegmentKind.TEXT, 0, 1, label="FAKE")
+        fabricated_full = ChunkProvenance((fake, *original.provenance.segments))
+        with self.assertRaisesRegex(ValueError, "provenance partitions"):
+            replace(original, provenance=fabricated_full)
+
+        provenance_sha = compute_provenance_sha256(
+            fabricated_full,
+            original.content_provenance,
+            original.overlap_provenance,
+        )
+        metadata_sha = compute_chunk_metadata_sha256(
+            manifest=original.manifest,
+            index=original.index,
+            start=original.start,
+            end=original.end,
+            new_content_start=original.new_content_start,
+            unit_count=original.unit_count,
+            text_sha256=original.text_sha256,
+            provenance_sha256=provenance_sha,
+        )
+        authenticated = replace(
+            original,
+            provenance=fabricated_full,
+            provenance_sha256=provenance_sha,
+            chunk_metadata_sha256=metadata_sha,
+        )
+        self.assertNotEqual(authenticated.chunk_id, original.chunk_id)
+
+    def test_public_chunk_invariants_and_authenticated_reconstruction(self):
+        chunks = chunk_document(
+            "abcdefghij",
+            max_chars=4,
+            respect_boundaries=False,
+            **self.options(),
+        )
+        with self.assertRaisesRegex(ValueError, "unit_count"):
+            replace(chunks[0], unit_count=999)
+        with self.assertRaisesRegex(ValueError, "overlap"):
+            replace(chunks[0], new_content_start=1)
+        with self.assertRaisesRegex(ValueError, "source SHA-256"):
+            reconstruct_chunks(chunks[:1])
+        with self.assertRaisesRegex(ValueError, "ordered"):
+            reconstruct_chunks(tuple(reversed(chunks)))
 
 
 if __name__ == "__main__":
