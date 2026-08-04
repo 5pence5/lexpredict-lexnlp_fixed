@@ -691,5 +691,274 @@ class LosslessChunkTests(unittest.TestCase):
             reconstruct_chunks(tuple(reversed(chunks)))
 
 
+class CorrectiveCoreRegressionTests(unittest.TestCase):
+    def options(self):
+        return {
+            "paragraph_segmenter": whole_paragraph,
+            "sentence_segmenter": whole_sentence,
+            "paragraph_backend_id": "tests.whole-paragraph.v1",
+            "sentence_backend_id": "tests.whole-sentence.v1",
+        }
+
+    def test_table_rows_take_precedence_over_outline_markers(self):
+        text = "1. introduction\na | b | c\n2. | d | e\n"
+        hierarchy = segment_document(text, **self.options())
+
+        self.assertEqual(hierarchy.reconstruct(), text)
+        clauses = list(hierarchy.segments(SegmentKind.CLAUSE))
+        tables = list(hierarchy.segments(SegmentKind.TABLE))
+        self.assertEqual([node.label for node in clauses], ["1."])
+        self.assertEqual(len(tables), 1)
+        self.assertLessEqual(clauses[0].start, tables[0].start)
+        self.assertLessEqual(tables[0].end, clauses[0].end)
+
+    def test_typed_digest_framing_distinguishes_none_and_literal_sentinel(self):
+        source_text = "x"
+        none_tree = DocumentHierarchy.from_segments(
+            source_text,
+            (Segment(SegmentKind.TEXT, 0, 1, label=None),),
+        )
+        literal_tree = DocumentHierarchy.from_segments(
+            source_text,
+            (Segment(SegmentKind.TEXT, 0, 1, label="<none>"),),
+        )
+        self.assertNotEqual(
+            none_tree.manifest.tree_sha256,
+            literal_tree.manifest.tree_sha256,
+        )
+
+        none_reference = SegmentReference(
+            "text:0:1", SegmentKind.TEXT, 0, 1, label=None
+        )
+        literal_reference = SegmentReference(
+            "text:0:1", SegmentKind.TEXT, 0, 1, label="<none>"
+        )
+        empty = ChunkProvenance()
+        none_digest = compute_provenance_sha256(
+            ChunkProvenance((none_reference,)), empty, empty
+        )
+        literal_digest = compute_provenance_sha256(
+            ChunkProvenance((literal_reference,)), empty, empty
+        )
+        self.assertNotEqual(none_digest, literal_digest)
+
+        none_chunk = chunk_document(
+            source_text,
+            max_chars=10,
+            structural_spans=(
+                StructuralSpan(
+                    SegmentKind.SECTION,
+                    0,
+                    1,
+                    label=None,
+                ),
+            ),
+            structural_backend_id="tests.typed-tree.v1",
+            **self.options(),
+        )[0]
+        literal_chunk = chunk_document(
+            source_text,
+            max_chars=10,
+            structural_spans=(
+                StructuralSpan(
+                    SegmentKind.SECTION,
+                    0,
+                    1,
+                    label="<none>",
+                ),
+            ),
+            structural_backend_id="tests.typed-tree.v1",
+            **self.options(),
+        )[0]
+        self.assertNotEqual(
+            none_chunk.manifest.manifest_id,
+            literal_chunk.manifest.manifest_id,
+        )
+        self.assertNotEqual(none_chunk.chunk_id, literal_chunk.chunk_id)
+
+    def test_backend_identity_requires_execution_and_falsey_callables_are_used(self):
+        with self.assertRaisesRegex(ValueError, "corresponding backend"):
+            segment_document(
+                "text",
+                sentence_backend_id="claimed.sentence.v1",
+                paragraph_segmenter=whole_paragraph,
+                paragraph_backend_id="tests.whole-paragraph.v1",
+            )
+        with self.assertRaisesRegex(ValueError, "corresponding backend"):
+            segment_document(
+                "text",
+                paragraph_backend_id="claimed.paragraph.v1",
+                sentence_segmenter=whole_sentence,
+                sentence_backend_id="tests.whole-sentence.v1",
+            )
+
+        defaults = segment_document(
+            "",
+            sentence_backend_id="lexnlp.sentences.get_sentence_span:v1",
+            paragraph_backend_id="builtin.blank_lines.v1",
+        )
+        self.assertEqual(
+            defaults.manifest.sentence_backend_id,
+            "lexnlp.sentences.get_sentence_span:v1",
+        )
+        self.assertEqual(
+            defaults.manifest.paragraph_backend_id,
+            "builtin.blank_lines.v1",
+        )
+
+        class FalseyBackend:
+            def __init__(self, backend_id, result_factory):
+                self.backend_id = backend_id
+                self.result_factory = result_factory
+                self.calls = 0
+
+            def __bool__(self):
+                return False
+
+            def __call__(self, text):
+                self.calls += 1
+                return self.result_factory(text)
+
+        paragraph = FalseyBackend(
+            "tests.falsey-paragraph.v1",
+            lambda text: ((0, len(text), text),) if text else (),
+        )
+        sentence = FalseyBackend(
+            "tests.falsey-sentence.v1",
+            lambda _text: (),
+        )
+        hierarchy = segment_document(
+            "operative text",
+            paragraph_segmenter=paragraph,
+            sentence_segmenter=sentence,
+        )
+        self.assertEqual(paragraph.calls, 1)
+        self.assertEqual(sentence.calls, 1)
+        self.assertEqual(
+            hierarchy.manifest.paragraph_backend_id,
+            paragraph.backend_id,
+        )
+        self.assertEqual(
+            hierarchy.manifest.sentence_backend_id,
+            sentence.backend_id,
+        )
+        self.assertEqual(
+            [leaf.kind for leaf in hierarchy.leaves()],
+            [SegmentKind.TEXT],
+        )
+
+    def test_preserve_policy_finds_table_beneath_unprotected_list_item(self):
+        text = "lead\nrow | value | note\ntail"
+        table_start = text.index("row")
+        table_end = text.index("\n", table_start) + 1
+        hierarchy = segment_document(
+            text,
+            structural_spans=(
+                StructuralSpan(SegmentKind.LIST_ITEM, 0, len(text), label="(a)"),
+                StructuralSpan(
+                    SegmentKind.TABLE,
+                    table_start,
+                    table_end,
+                    attributes=(("page", "1"),),
+                ),
+            ),
+            structural_backend_id="tests.nested-layout.v1",
+            **self.options(),
+        )
+        preserved = chunk_document(
+            hierarchy,
+            max_chars=100,
+            container_policy=ContainerPolicy.PRESERVE,
+        )
+        packed = chunk_document(
+            hierarchy,
+            max_chars=100,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+        )
+
+        self.assertEqual(
+            [(chunk.start, chunk.end) for chunk in preserved],
+            [(0, table_start), (table_start, table_end), (table_end, len(text))],
+        )
+        self.assertEqual([(chunk.start, chunk.end) for chunk in packed], [(0, len(text))])
+        table_reference = next(
+            reference
+            for reference in preserved[1].provenance.segments
+            if reference.kind is SegmentKind.TABLE
+        )
+        self.assertEqual(table_reference.attributes, (("page", "1"),))
+        self.assertEqual(reconstruct_chunks(preserved), text)
+
+    @staticmethod
+    def timed(operation):
+        samples = []
+        result = None
+        for _ in range(3):
+            started = time.perf_counter()
+            result = operation()
+            samples.append(time.perf_counter() - started)
+        return statistics.median(samples), result
+
+    def test_heading_index_keeps_thousands_of_preserved_chunks_subquadratic(self):
+        def hierarchy_for(size):
+            text = "".join(
+                f"{index}. H{index}\nbody\n"
+                for index in range(1, size + 1)
+            )
+            return segment_document(
+                text,
+                paragraph_segmenter=empty_backend,
+                sentence_segmenter=empty_backend,
+                paragraph_backend_id="tests.empty-paragraph.v1",
+                sentence_backend_id="tests.empty-sentence.v1",
+            )
+
+        small = hierarchy_for(600)
+        large = hierarchy_for(1800)
+        self.timed(lambda: chunk_document(small, max_chars=32))
+        small_time, small_chunks = self.timed(
+            lambda: chunk_document(small, max_chars=32)
+        )
+        large_time, large_chunks = self.timed(
+            lambda: chunk_document(large, max_chars=32)
+        )
+
+        self.assertEqual(len(small_chunks), 600)
+        self.assertEqual(len(large_chunks), 1800)
+        self.assertLess(
+            large_time / max(small_time, 1e-6),
+            6.0,
+            (small_time, large_time),
+        )
+
+    def test_table_parent_sweep_is_subquadratic(self):
+        def detect(size):
+            text = "".join(
+                f"{index}. introduction\nA | B | C\n\n"
+                for index in range(1, size + 1)
+            )
+            return segment_document(
+                text,
+                paragraph_segmenter=empty_backend,
+                sentence_segmenter=empty_backend,
+                paragraph_backend_id="tests.empty-paragraph.v1",
+                sentence_backend_id="tests.empty-sentence.v1",
+            )
+
+        self.timed(lambda: detect(300))
+        small_time, small = self.timed(lambda: detect(300))
+        large_time, large = self.timed(lambda: detect(900))
+
+        self.assertEqual(len(list(small.segments(SegmentKind.TABLE))), 300)
+        self.assertEqual(len(list(large.segments(SegmentKind.TABLE))), 900)
+        self.assertEqual(small.reconstruct(), small.source)
+        self.assertEqual(large.reconstruct(), large.source)
+        self.assertLess(
+            large_time / max(small_time, 1e-6),
+            6.0,
+            (small_time, large_time),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

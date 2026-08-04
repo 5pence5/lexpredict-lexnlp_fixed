@@ -231,7 +231,22 @@ class StructuralSpan:
 
 
 def _digest_value(digest: "hashlib._Hash", value: object) -> None:
-    payload = b"<none>" if value is None else str(value).encode("utf-8", "surrogatepass")
+    """Frame supported scalar types without cross-type or sentinel collisions."""
+    if value is None:
+        type_tag = b"N"
+        payload = b""
+    elif isinstance(value, bool):
+        type_tag = b"B"
+        payload = b"1" if value else b"0"
+    elif isinstance(value, int):
+        type_tag = b"I"
+        payload = str(value).encode("ascii")
+    elif isinstance(value, str):
+        type_tag = b"S"
+        payload = value.encode("utf-8", "surrogatepass")
+    else:
+        raise TypeError(f"unsupported digest value type: {type(value).__name__}")
+    digest.update(type_tag)
     digest.update(len(payload).to_bytes(8, "big"))
     digest.update(payload)
 
@@ -697,6 +712,11 @@ def _outline_spans(
 
         if line.index in heading_lines or not line.stripped:
             continue
+        # Delimited table rows own their line-level structural evidence.
+        # Treating a leading cell such as "2." as an outline marker can make
+        # one table block cross two clause scopes.
+        if line.stripped.count("|") >= 2 or line.content.count("\t") >= 2:
+            continue
         list_match = _LIST_RE.match(line.content)
         clause_match = _CLAUSE_RE.match(line.content)
         parent = active_sections[-1] if active_sections else None
@@ -749,7 +769,7 @@ def _table_spans(
     lines: Sequence[_Line],
     containers: Sequence[StructuralSpan],
 ) -> list[StructuralSpan]:
-    result: list[StructuralSpan] = []
+    blocks: list[tuple[int, int]] = []
     index = 0
     while index < len(lines):
         line = lines[index]
@@ -765,12 +785,39 @@ def _table_spans(
                 index += 1
             else:
                 break
-        start = lines[start_index].start
-        end = lines[index - 1].end
-        parents = [
-            span for span in containers if span.start <= start and end <= span.end
-        ]
-        parent = min(parents, key=lambda span: span.end - span.start) if parents else None
+        blocks.append((lines[start_index].start, lines[index - 1].end))
+
+    # Both inputs are source ordered and the structural containers are
+    # laminar.  Sweep each container once rather than rescanning C containers
+    # for every one of T tables.
+    ordered_containers = sorted(
+        containers,
+        key=lambda span: (span.start, -span.end, span.kind.value),
+    )
+    active: list[StructuralSpan] = []
+    container_index = 0
+    result: list[StructuralSpan] = []
+    for start, end in blocks:
+        while active and active[-1].end <= start:
+            active.pop()
+        while (
+            container_index < len(ordered_containers)
+            and ordered_containers[container_index].start <= start
+        ):
+            candidate = ordered_containers[container_index]
+            container_index += 1
+            while active and candidate.start >= active[-1].end:
+                active.pop()
+            if candidate.end <= start:
+                continue
+            active.append(candidate)
+        while active and active[-1].end < end:
+            active.pop()
+        parent = (
+            active[-1]
+            if active and active[-1].start <= start and end <= active[-1].end
+            else None
+        )
         level = ((parent.level or 0) + 1) if parent else 1
         result.append(
             StructuralSpan(
@@ -1065,12 +1112,14 @@ def _callable_id(
     *,
     name: str,
 ) -> str:
+    if backend is None:
+        if explicit is None or explicit == default:
+            return default
+        raise ValueError(f"{name} requires its corresponding backend callable")
     if explicit is not None:
         if not isinstance(explicit, str) or not explicit.strip():
             raise ValueError(f"{name} must be a non-empty string")
         return explicit
-    if backend is None:
-        return default
     attribute = getattr(backend, "backend_id", None)
     if isinstance(attribute, str) and attribute.strip():
         return attribute
@@ -1126,8 +1175,16 @@ def segment_document(
 
     validated = _validate_structural_spans(realised_spans, len(text))
     forest = _span_forest(validated)
-    paragraph_backend = paragraph_segmenter or _default_paragraph_spans
-    sentence_backend = sentence_segmenter or _legacy_sentence_segmenter
+    paragraph_backend = (
+        _default_paragraph_spans
+        if paragraph_segmenter is None
+        else paragraph_segmenter
+    )
+    sentence_backend = (
+        _legacy_sentence_segmenter
+        if sentence_segmenter is None
+        else sentence_segmenter
+    )
     paragraph_id = _callable_id(
         paragraph_segmenter,
         paragraph_backend_id,

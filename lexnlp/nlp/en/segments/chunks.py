@@ -54,7 +54,22 @@ def _digest(text: str) -> str:
 
 
 def _digest_value(digest: "hashlib._Hash", value: object) -> None:
-    payload = b"<none>" if value is None else str(value).encode("utf-8", "surrogatepass")
+    """Frame supported scalar types without cross-type or sentinel collisions."""
+    if value is None:
+        type_tag = b"N"
+        payload = b""
+    elif isinstance(value, bool):
+        type_tag = b"B"
+        payload = b"1" if value else b"0"
+    elif isinstance(value, int):
+        type_tag = b"I"
+        payload = str(value).encode("ascii")
+    elif isinstance(value, str):
+        type_tag = b"S"
+        payload = value.encode("utf-8", "surrogatepass")
+    else:
+        raise TypeError(f"unsupported digest value type: {type(value).__name__}")
+    digest.update(type_tag)
     digest.update(len(payload).to_bytes(8, "big"))
     digest.update(payload)
 
@@ -455,7 +470,7 @@ class _HierarchyIndex:
                             heading_intervals.add((node.start, heading_end))
             stack.extend(reversed(node.children))
         self.boundaries = tuple(sorted(boundaries))
-        self.heading_intervals = tuple(sorted(heading_intervals))
+        self.headings = _HeadingIndex(heading_intervals)
 
     def references(self, start: int, end: int) -> tuple[SegmentReference, ...]:
         if start >= end:
@@ -489,73 +504,98 @@ _PROTECTED_KINDS = {
 
 
 def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
-    units: list[tuple[int, int]] = []
+    """Partition around protected containers at any descendant depth."""
+    contains_protected: dict[int, bool] = {}
+    stack: list[tuple[Segment, bool]] = [(root, False)]
+    while stack:
+        node, visited = stack.pop()
+        if not visited:
+            stack.append((node, True))
+            stack.extend((child, False) for child in reversed(node.children))
+            continue
+        contains_protected[id(node)] = (
+            node.kind in _PROTECTED_KINDS
+            or any(contains_protected[id(child)] for child in node.children)
+        )
 
-    def append(start: int, end: int) -> None:
+    units: list[tuple[int, int, bool]] = []
+
+    def emit(start: int, end: int, protected: bool) -> None:
         if start >= end:
             return
-        if units and units[-1][1] == start:
-            previous_start, _ = units[-1]
-            # Plain adjacent gaps may be coalesced, but protected containers are
-            # emitted by a separate call and therefore remain distinct.
-            if previous_start == start:
-                units[-1] = (previous_start, end)
-                return
-        units.append((start, end))
+        if (
+            not protected
+            and units
+            and not units[-1][2]
+            and units[-1][1] == start
+        ):
+            units[-1] = (units[-1][0], end, False)
+        else:
+            units.append((start, end, protected))
 
     def visit(node: Segment) -> None:
-        protected = [
-            child for child in node.children if child.kind in _PROTECTED_KINDS
+        protected_children = [
+            child for child in node.children if contains_protected[id(child)]
         ]
-        if node.kind in _PROTECTED_KINDS and not protected:
-            units.append((node.start, node.end))
+        if node.kind in _PROTECTED_KINDS and not protected_children:
+            emit(node.start, node.end, True)
             return
-        if protected:
-            cursor = node.start
-            for child in protected:
-                append(cursor, child.start)
-                visit(child)
-                cursor = child.end
-            append(cursor, node.end)
+        if not protected_children:
+            emit(node.start, node.end, False)
             return
-        units.append((node.start, node.end))
+
+        cursor = node.start
+        for child in protected_children:
+            emit(cursor, child.start, False)
+            visit(child)
+            cursor = child.end
+        emit(cursor, node.end, False)
 
     visit(root)
-    return tuple(unit for unit in units if unit[0] < unit[1])
+    return tuple((start, end) for start, end, _protected in units)
 
 
-def _safe_hard_end(
-    fresh_start: int,
-    hard_end: int,
-    headings: Sequence[tuple[int, int]],
-) -> int:
-    for heading_start, heading_end in headings:
-        if heading_start < hard_end < heading_end:
-            if heading_start > fresh_start:
-                return heading_start
-            # An individually oversized heading must be hard-split.
+class _HeadingIndex:
+    """Bisect-backed heading containment checks used by every chunk."""
+
+    def __init__(self, intervals: Iterable[tuple[int, int]]) -> None:
+        ordered = tuple(sorted(set(intervals)))
+        self.intervals = ordered
+        self.starts = tuple(start for start, _end in ordered)
+        self.ends = tuple(end for _start, end in ordered)
+
+    def containing(self, position: int) -> tuple[int, int] | None:
+        index = bisect.bisect_right(self.starts, position) - 1
+        if (
+            index >= 0
+            and self.starts[index] < position < self.ends[index]
+        ):
+            return self.starts[index], self.ends[index]
+        return None
+
+    def safe_hard_end(self, fresh_start: int, hard_end: int) -> int:
+        containing = self.containing(hard_end)
+        if containing is None:
             return hard_end
-        if heading_start >= hard_end:
-            break
-    return hard_end
+        heading_start, _heading_end = containing
+        if heading_start > fresh_start:
+            return heading_start
+        # An individually oversized heading must be hard-split.
+        return hard_end
 
-
-def _safe_boundary(
-    boundary: int,
-    headings: Sequence[tuple[int, int]],
-) -> bool:
-    return not any(start < boundary < end for start, end in headings)
+    def is_safe(self, boundary: int) -> bool:
+        return self.containing(boundary) is None
 
 
 def _boundary_end(
     boundaries: Sequence[int],
-    headings: Sequence[tuple[int, int]],
+    headings: _HeadingIndex,
     *,
     fresh_start: int,
     hard_end: int,
     respect_boundaries: bool,
 ) -> int:
-    hard_end = _safe_hard_end(fresh_start, hard_end, headings)
+    hard_end = headings.safe_hard_end(fresh_start, hard_end)
     if not respect_boundaries:
         return hard_end
     position = bisect.bisect_right(boundaries, hard_end)
@@ -564,7 +604,7 @@ def _boundary_end(
         candidate = boundaries[position]
         if candidate <= fresh_start:
             break
-        if _safe_boundary(candidate, headings):
+        if headings.is_safe(candidate):
             return candidate
     return hard_end
 
@@ -690,7 +730,7 @@ def _token_end(
     source: str,
     counter: TokenCounter,
     boundaries: Sequence[int],
-    headings: Sequence[tuple[int, int]],
+    headings: _HeadingIndex,
     *,
     context_start: int,
     fresh_start: int,
@@ -702,7 +742,7 @@ def _token_end(
     raw = _raw_token_end(cache, context_start, fresh_start, limit, budget)
     if raw is None:
         return None
-    raw = _safe_hard_end(fresh_start, raw, headings)
+    raw = headings.safe_hard_end(fresh_start, raw)
     candidate = raw
     if respect_boundaries:
         position = bisect.bisect_right(boundaries, raw)
@@ -713,7 +753,7 @@ def _token_end(
             if boundary <= fresh_start:
                 break
             if (
-                _safe_boundary(boundary, headings)
+                headings.is_safe(boundary)
                 and cache.count(context_start, boundary) <= budget
             ):
                 candidate = boundary
@@ -946,7 +986,7 @@ def iter_chunks(
                 hard_end = min(unit_end, context_start + budget)
                 end = _boundary_end(
                     hierarchy_index.boundaries,
-                    hierarchy_index.heading_intervals,
+                    hierarchy_index.headings,
                     fresh_start=fresh_start,
                     hard_end=hard_end,
                     respect_boundaries=respect_boundaries,
@@ -956,7 +996,7 @@ def iter_chunks(
                     hard_end = min(unit_end, context_start + budget)
                     end = _boundary_end(
                         hierarchy_index.boundaries,
-                        hierarchy_index.heading_intervals,
+                        hierarchy_index.headings,
                         fresh_start=fresh_start,
                         hard_end=hard_end,
                         respect_boundaries=respect_boundaries,
@@ -981,7 +1021,7 @@ def iter_chunks(
                     source,
                     token_counter,
                     hierarchy_index.boundaries,
-                    hierarchy_index.heading_intervals,
+                    hierarchy_index.headings,
                     context_start=context_start,
                     fresh_start=fresh_start,
                     limit=unit_end,
@@ -994,7 +1034,7 @@ def iter_chunks(
                         source,
                         token_counter,
                         hierarchy_index.boundaries,
-                        hierarchy_index.heading_intervals,
+                        hierarchy_index.headings,
                         context_start=context_start,
                         fresh_start=fresh_start,
                         limit=unit_end,
