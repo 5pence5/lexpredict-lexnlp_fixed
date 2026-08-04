@@ -194,7 +194,7 @@ and statute profiles.  Exact true positives were 1 section, 1 clause, 2 list
 items, 8 paragraphs and 10 sentences, with no false positives or negatives.
 Lexical retrieval MRR was 0.8333, character recall@3 1.0 and context
 precision@1 0.4810 (exactly 0.48098916194431673).  Mean chunk length was
-90.55 and amplification 1.0143.
+79.23 and amplification 1.0489.
 
 These values come from hermetic, synthetic fixtures: only eight edge cases
 (1,351 characters), three complete-boundary cases (221 characters), and two
