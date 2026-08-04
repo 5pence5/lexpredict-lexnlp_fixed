@@ -560,3 +560,74 @@ jobs:
             --installed
           "${RUNNER_TEMP}/venv-sdist/bin/python" -c \
             'import lexnlp; print(lexnlp.__version__)'
+
+  aggregate-status:
+    name: Aggregate CI Status
+    if: ${{ always() && github.event_name == 'push' }}
+    needs:
+      - base-tests
+      - segmentation-quality
+      - cross-platform-smoke
+      - minimum-dependencies
+      - supply-chain
+      - stanford-tests
+      - model-quality
+      - contract-type-smoke
+      - packaging-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      statuses: write
+    steps:
+      - name: Publish aggregate commit status
+        env:
+          API_URL: ${{ github.api_url }}
+          REPOSITORY: ${{ github.repository }}
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GITHUB_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJson(needs) }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import urllib.request
+
+          needs = json.loads(os.environ["NEEDS_JSON"])
+          failed = sorted(
+              name
+              for name, evidence in needs.items()
+              if evidence.get("result") != "success"
+          )
+          state = "failure" if failed else "success"
+          description = (
+              "failed: " + ", ".join(failed)
+              if failed
+              else f"all {len(needs)} required CI jobs succeeded"
+          )[:140]
+          payload = json.dumps(
+              {
+                  "state": state,
+                  "context": "lexnlp/full-ci",
+                  "description": description,
+                  "target_url": os.environ["RUN_URL"],
+              }
+          ).encode("utf-8")
+          request = urllib.request.Request(
+              f"{os.environ['API_URL']}/repos/{os.environ['REPOSITORY']}"
+              f"/statuses/{os.environ['COMMIT_SHA']}",
+              data=payload,
+              method="POST",
+              headers={
+                  "Accept": "application/vnd.github+json",
+                  "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
+                  "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
+              },
+          )
+          with urllib.request.urlopen(request, timeout=30) as response:
+              if response.status != 201:
+                  raise RuntimeError(f"status API returned {response.status}")
+          if failed:
+              raise SystemExit(description)
+          PY
