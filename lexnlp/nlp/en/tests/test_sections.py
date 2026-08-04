@@ -21,6 +21,7 @@ import os
 
 # Project imports
 from unittest import TestCase
+from unittest.mock import patch
 
 from lexnlp import get_module_path
 from lexnlp.nlp.en.segments.sections import get_sections, get_section_spans, DocumentSection, find_section_titles
@@ -101,8 +102,66 @@ class TestSectionSpans(TestCase):
 
     def test_bad_text(self):
         text = 'text'
-        sections = list(get_section_spans(text))
+        for predicted in ([[1.0, 0.0]], [[0.0, 1.0]]):
+            with self.subTest(predicted=predicted):
+                with patch(
+                    'lexnlp.nlp.en.segments.sections.'
+                    'SectionSegmenterModel.SECTION_SEGMENTER_MODEL.predict_proba',
+                    return_value=predicted,
+                ) as predictor:
+                    sections = list(get_section_spans(text))
+                predictor.assert_not_called()
+                self.assertEqual(sections, [])
+
+    def test_custom_underspecified_window_yields_no_ml_section(self):
+        text = 'one\ntwo\nthree\nfour'
+        with patch(
+            'lexnlp.nlp.en.segments.sections.'
+            'SectionSegmenterModel.SECTION_SEGMENTER_MODEL.predict_proba',
+            return_value=[[0.0, 1.0]] * 4,
+        ) as predictor:
+            sections = list(get_sections(text, window_pre=0, window_post=0))
+        predictor.assert_not_called()
         self.assertEqual(sections, [])
+
+    def test_same_width_custom_windows_do_not_relabel_section_features(self):
+        text = 'one\ntwo\nthree\nfour\nfive\nsix\nseven'
+        for window_pre, window_post in ((0, 6), (2, 4), (4, 2), (6, 0)):
+            with self.subTest(window_pre=window_pre, window_post=window_post):
+                with patch(
+                    'lexnlp.nlp.en.segments.sections.'
+                    'SectionSegmenterModel.SECTION_SEGMENTER_MODEL.predict_proba',
+                    return_value=[[0.0, 1.0]] * 7,
+                ) as predictor:
+                    detected = list(
+                        get_sections(
+                            text,
+                            window_pre=window_pre,
+                            window_post=window_post,
+                        )
+                    )
+                predictor.assert_not_called()
+                self.assertEqual(detected, [])
+
+    def test_four_lines_realise_the_complete_section_model_schema(self):
+        from lexnlp.nlp.en.segments import sections as section_module
+
+        text = 'one\ntwo\nthree\nfour'
+        lines = text.splitlines()
+        distribution = section_module.build_document_line_distribution(text)
+        columns = section_module.get_section_feature_names(
+            lines_count=len(lines),
+            line_window_pre=3,
+            line_window_post=3,
+            include_doc=distribution,
+        )
+        self.assertTrue(section_module.has_compatible_line_window(3, 3))
+        self.assertTrue(
+            section_module.has_compatible_feature_width(
+                section_module.SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
+                len(columns),
+            )
+        )
 
     def test_title_start_end(self):
         text = self.get_text('lexnlp/nlp/en/tests/test_sections/skewed_document.txt')

@@ -26,7 +26,13 @@ from typing import Dict, Final, Generator, List, Set, Tuple, Union, Optional
 from pandas import DataFrame
 
 # LexNLP
-from lexnlp.nlp.en.segments.utils import build_document_line_distribution
+from lexnlp.nlp.en.segments.utils import (
+    TRAINED_LINE_WINDOW_POST,
+    TRAINED_LINE_WINDOW_PRE,
+    build_document_line_distribution,
+    has_compatible_feature_width,
+    has_compatible_line_window,
+)
 from lexnlp.utils.unpickler import load_joblib_model
 
 
@@ -196,8 +202,8 @@ def _form_potential_paragraph(
 
 def get_paragraph_spans(
     text: str,
-    window_pre=3,
-    window_post=3,
+    window_pre=TRAINED_LINE_WINDOW_PRE,
+    window_post=TRAINED_LINE_WINDOW_POST,
     score_threshold=0.5,
 ) -> Generator[Tuple[int, int, str], None, None]:
     """
@@ -241,6 +247,18 @@ def get_paragraph_spans(
     )
     column_names.sort()
     feature_df: DataFrame = DataFrame(feature_data, columns=column_names).fillna(-1).astype(int)
+    if (
+        not has_compatible_line_window(window_pre, window_post)
+        or not has_compatible_feature_width(
+            PARAGRAPH_SEGMENTER_MODEL,
+            feature_df.shape[1],
+        )
+    ):
+        # The historical feature-mismatch fallback is one exact paragraph.
+        # Enforce it before an underspecified matrix can reach a legacy tree.
+        if text:
+            yield 0, len(text), text
+        return
 
     try:
         # Avoid pandas dtype deprecation noise in sklearn validation by passing a numpy array.
@@ -284,8 +302,8 @@ def get_paragraph_spans(
 
 def get_paragraph_span_list(
     text: str,
-    window_pre=3,
-    window_post=3,
+    window_pre=TRAINED_LINE_WINDOW_PRE,
+    window_post=TRAINED_LINE_WINDOW_POST,
     score_threshold=0.5,
 ) -> List[Tuple[int, int, str]]:
     """
@@ -317,8 +335,8 @@ def get_paragraph_span_list(
 
 def get_paragraphs(
     text: str,
-    window_pre=3,
-    window_post=3,
+    window_pre=TRAINED_LINE_WINDOW_PRE,
+    window_post=TRAINED_LINE_WINDOW_POST,
     score_threshold=0.5,
 ) -> Generator[str, None, None]:
     """
@@ -349,8 +367,8 @@ def get_paragraphs(
 
 def get_paragraph_list(
     text: str,
-    window_pre=3,
-    window_post=3,
+    window_pre=TRAINED_LINE_WINDOW_PRE,
+    window_post=TRAINED_LINE_WINDOW_POST,
     score_threshold=0.5,
 ) -> List[str]:
     """

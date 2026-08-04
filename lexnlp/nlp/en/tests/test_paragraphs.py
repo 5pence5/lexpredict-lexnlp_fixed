@@ -11,6 +11,7 @@ __email__ = "support@contraxsuite.com"
 
 import os
 import string
+from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -95,14 +96,15 @@ class TestParagraphs(TestCase):
     def test_single_line_paragraph_span_starts_at_zero(self):
         text = '2021-01-20T10:32:31.938706'
 
-        # Force the classifier down the break-at-first-line path which used to
-        # expose a (-1, len(text)) span for single-line documents.
+        # The one-line matrix is narrower than the fitted estimator schema and
+        # must use the deterministic whole-source compatibility fallback.
         with patch.object(
             paragraphs.PARAGRAPH_SEGMENTER_MODEL,
             'predict_proba',
             return_value=[[0.0, 1.0]],
-        ):
+        ) as predictor:
             self.assertEqual([(0, len(text), text)], get_paragraph_span_list(text))
+        predictor.assert_not_called()
 
     def test_document_distribution_1_lc(self):
         """
@@ -183,10 +185,106 @@ class TestParagraphs(TestCase):
 
     def test_get_paragraphs_too_small_text_with_spans(self):
         text = '\nToo small text\n'
-        spans = get_paragraph_span_list(text=text)
+        for predicted in (
+            [[1.0, 0.0], [0.0, 1.0]],
+            [[0.0, 1.0], [1.0, 0.0]],
+        ):
+            with self.subTest(predicted=predicted):
+                with patch.object(
+                    paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+                    'predict_proba',
+                    return_value=predicted,
+                ) as predictor:
+                    spans = get_paragraph_span_list(text=text)
+                predictor.assert_not_called()
+                self.assertEqual([(0, len(text), text)], spans)
+
+    def test_custom_underspecified_window_uses_paragraph_fallback(self):
+        text = 'one\ntwo\nthree\nfour'
+        with patch.object(
+            paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+            'predict_proba',
+            return_value=[[0.0, 1.0]] * 4,
+        ) as predictor:
+            spans = get_paragraph_span_list(
+                text,
+                window_pre=0,
+                window_post=0,
+            )
+        predictor.assert_not_called()
+        self.assertEqual([(0, len(text), text)], spans)
+
+    def test_same_width_custom_windows_do_not_relabel_model_features(self):
+        text = 'one\ntwo\nthree\nfour\nfive\nsix\nseven'
+        for window_pre, window_post in ((0, 6), (2, 4), (4, 2), (6, 0)):
+            with self.subTest(window_pre=window_pre, window_post=window_post):
+                with patch.object(
+                    paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+                    'predict_proba',
+                    return_value=[[0.0, 1.0]] * 7,
+                ) as predictor:
+                    spans = get_paragraph_span_list(
+                        text,
+                        window_pre=window_pre,
+                        window_post=window_post,
+                    )
+                predictor.assert_not_called()
+                self.assertEqual([(0, len(text), text)], spans)
+
+    def test_feature_width_requires_consistent_forest_metadata(self):
+        child_361 = SimpleNamespace(tree_=SimpleNamespace(n_features=361))
+        consistent = SimpleNamespace(estimators_=[child_361, child_361])
+        inconsistent = SimpleNamespace(
+            estimators_=[
+                child_361,
+                SimpleNamespace(tree_=SimpleNamespace(n_features=360)),
+            ]
+        )
+        incomplete = SimpleNamespace(
+            estimators_=[child_361, SimpleNamespace()]
+        )
+        contradictory_parent = SimpleNamespace(
+            n_features_in_=361,
+            n_features_=360,
+            estimators_=[child_361, child_361],
+        )
+
         self.assertEqual(
-            first=(0, len(text), text),
-            second=spans[0],
+            paragraphs.resolve_model_feature_width(consistent),
+            361,
+        )
+        self.assertTrue(
+            paragraphs.has_compatible_feature_width(consistent, 361)
+        )
+        self.assertFalse(
+            paragraphs.has_compatible_feature_width(consistent, 360)
+        )
+        self.assertIsNone(
+            paragraphs.resolve_model_feature_width(inconsistent)
+        )
+        self.assertIsNone(
+            paragraphs.resolve_model_feature_width(incomplete)
+        )
+        self.assertIsNone(
+            paragraphs.resolve_model_feature_width(contradictory_parent)
+        )
+
+    def test_four_lines_realise_the_complete_paragraph_model_schema(self):
+        text = 'one\ntwo\nthree\nfour'
+        lines, _spans = splitlines_with_spans(text)
+        distribution = paragraphs.build_document_line_distribution(text)
+        columns = paragraphs.get_paragraph_break_feature_names(
+            lines_count=len(lines),
+            line_window_pre=3,
+            line_window_post=3,
+            include_doc=distribution,
+        )
+        self.assertTrue(paragraphs.has_compatible_line_window(3, 3))
+        self.assertTrue(
+            paragraphs.has_compatible_feature_width(
+                paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+                len(columns),
+            )
         )
 
     def test_date_text(self):

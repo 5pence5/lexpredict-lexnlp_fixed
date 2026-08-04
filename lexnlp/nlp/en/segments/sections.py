@@ -26,7 +26,13 @@ import pandas
 import regex as re
 
 # Project imports
-from lexnlp.nlp.en.segments.utils import build_document_line_distribution
+from lexnlp.nlp.en.segments.utils import (
+    TRAINED_LINE_WINDOW_POST,
+    TRAINED_LINE_WINDOW_PRE,
+    build_document_line_distribution,
+    has_compatible_feature_width,
+    has_compatible_line_window,
+)
 from lexnlp.utils.map import Map
 from lexnlp.utils.decorators import safe_failure
 from lexnlp.utils.unpickler import load_joblib_model
@@ -204,7 +210,12 @@ def get_section_feature_names(
 
 # TODO: we let errors arise silently
 @safe_failure
-def get_sections(text, window_pre=3, window_post=3, score_threshold=0.5) -> Generator:
+def get_sections(
+    text,
+    window_pre=TRAINED_LINE_WINDOW_PRE,
+    window_post=TRAINED_LINE_WINDOW_POST,
+    score_threshold=0.5,
+) -> Generator:
     """
     Get sections from text.
     NLP-based detection of sections.
@@ -227,6 +238,16 @@ def get_sections(text, window_pre=3, window_post=3, score_threshold=0.5) -> Gene
     columns = list(get_section_feature_names(len(lines), window_pre, window_post, include_doc=doc_distribution))
     columns.sort()
     test_feature_df = pandas.DataFrame(test_feature_data, columns=columns).fillna(-1)
+    if (
+        not has_compatible_line_window(window_pre, window_post)
+        or not has_compatible_feature_width(
+            SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
+            test_feature_df.shape[1],
+        )
+    ):
+        # The established feature-mismatch fallback is no ML section.
+        return
+
     # Avoid pandas dtype deprecation noise in sklearn validation by passing a numpy array.
     test_predicted_lines = SectionSegmenterModel.SECTION_SEGMENTER_MODEL.predict_proba(test_feature_df.to_numpy(dtype=float))
     predicted_df = pandas.DataFrame(test_predicted_lines, columns=["prob_false", "prob_true"])
