@@ -149,6 +149,7 @@ class TestEmbeddingPayloads(TestCase):
             tokenizer_id="characters:v1",
             max_tokens=100,
             context_fragments=(fragment, fragment),
+            include_ancestry_labels=False,
         )
         self.assertEqual(("Name | Amount",), tuple(f.text for f in payload.context_fragments))
         self.assertEqual("Name | Amount\n\n" + chunk.text, payload.text)
@@ -160,6 +161,7 @@ class TestEmbeddingPayloads(TestCase):
                 tokenizer_id="characters:v1",
                 max_tokens=len(chunk.text),
                 context_fragments=(fragment,),
+                include_ancestry_labels=False,
             )
 
     def test_context_role_owner_contract_fails_at_boundary(self):
