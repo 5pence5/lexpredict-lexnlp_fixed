@@ -97,13 +97,9 @@ def build_section_break_features(
     # Feature vector
     feature_vector = {}
 
-    # Check start offset
-    if line_id < line_window_pre:
-        line_window_pre = line_id
-
-    # Check final offset
-    if (line_id + line_window_post) >= len(lines):
-        line_window_post = len(lines) - line_window_post - 1
+    # Keep the global schema fixed while clipping unavailable values per row.
+    line_window_pre = min(line_window_pre, line_id)
+    line_window_post = min(line_window_post, len(lines) - line_id - 1)
 
     # Iterate through window
     for i in range(-line_window_pre, line_window_post + 1):
@@ -175,15 +171,12 @@ def get_section_feature_names(
         'first_char_number',
         'last_char_number'}
 
-    # Check start offset
-    if lines_count - 1 < line_window_pre:
-        line_window_pre = lines_count - 1
+    # The fitted model owns one fixed global offset schema. Missing edge-row
+    # values are filled later; document length must never remove columns.
+    # ``lines_count`` remains in the public signature for compatibility.
+    _ = lines_count
 
-    # Check final offset
-    if line_window_post >= lines_count:
-        line_window_post = lines_count - line_window_post - 1
-
-    # Iterate through window
+    # Iterate through the complete requested window
     for i in range(-line_window_pre, line_window_post + 1):
         # Count length
         feature_vector.add(f'line_len_{i}')
@@ -226,9 +219,14 @@ def get_sections(
     :return:
     """
 
-    # Get document character distribution
-    doc_distribution = build_document_line_distribution(text)
     lines = text.splitlines()
+    if not lines:
+        return
+    if not has_compatible_line_window(window_pre, window_post):
+        return
+
+    # Get document character distribution only for an eligible model schema.
+    doc_distribution = build_document_line_distribution(text)
     test_feature_data = []
     for line_id in range(len(lines)):
         test_feature_data.append(
@@ -238,14 +236,11 @@ def get_sections(
     columns = list(get_section_feature_names(len(lines), window_pre, window_post, include_doc=doc_distribution))
     columns.sort()
     test_feature_df = pandas.DataFrame(test_feature_data, columns=columns).fillna(-1)
-    if (
-        not has_compatible_line_window(window_pre, window_post)
-        or not has_compatible_feature_width(
-            SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
-            test_feature_df.shape[1],
-        )
+    if not has_compatible_feature_width(
+        SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
+        test_feature_df.shape[1],
     ):
-        # The established feature-mismatch fallback is no ML section.
+        # Preserve the established no-section model-schema mismatch fallback.
         return
 
     # Avoid pandas dtype deprecation noise in sklearn validation by passing a numpy array.

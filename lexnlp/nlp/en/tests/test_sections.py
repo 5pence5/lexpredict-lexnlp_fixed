@@ -24,8 +24,22 @@ from unittest import TestCase
 from unittest.mock import patch
 
 from lexnlp import get_module_path
-from lexnlp.nlp.en.segments.sections import get_sections, get_section_spans, DocumentSection, find_section_titles
+from lexnlp.nlp.en.segments.sections import (
+    DocumentSection,
+    SectionSegmenterModel,
+    build_section_break_features,
+    find_section_titles,
+    get_section_feature_names,
+    get_section_spans,
+    get_sections,
+)
 from lexnlp.nlp.en.segments.sentences import get_sentence_span_list
+from lexnlp.nlp.en.segments.utils import (
+    build_document_line_distribution,
+    has_compatible_feature_width,
+    has_compatible_line_window,
+    resolve_model_feature_width,
+)
 from lexnlp.tests import lexnlp_tests
 
 
@@ -102,35 +116,82 @@ class TestSectionSpans(TestCase):
 
     def test_bad_text(self):
         text = 'text'
-        for predicted in ([[1.0, 0.0]], [[0.0, 1.0]]):
-            with self.subTest(predicted=predicted):
-                with patch(
-                    'lexnlp.nlp.en.segments.sections.'
-                    'SectionSegmenterModel.SECTION_SEGMENTER_MODEL.predict_proba',
-                    return_value=predicted,
-                ) as predictor:
-                    sections = list(get_section_spans(text))
-                predictor.assert_not_called()
-                self.assertEqual(sections, [])
+        sections = list(get_section_spans(text))
+        self.assertEqual(sections, [])
+
+    def test_short_documents_keep_the_full_section_feature_schema(self):
+        for text in ('text', 'one\ntwo'):
+            with self.subTest(text=text):
+                lines = text.splitlines()
+                distribution = build_document_line_distribution(text)
+                columns = get_section_feature_names(
+                    lines_count=len(lines),
+                    line_window_pre=3,
+                    line_window_post=3,
+                    include_doc=distribution,
+                )
+                self.assertEqual(len(columns), 369)
+                self.assertEqual(
+                    len(columns),
+                    resolve_model_feature_width(
+                        SectionSegmenterModel.SECTION_SEGMENTER_MODEL
+                    ),
+                )
+
+        lines = ["one", "two"]
+        first = build_section_break_features(lines, 0, 3, 3)
+        second = build_section_break_features(lines, 1, 3, 3)
+        self.assertIn("line_len_0", first)
+        self.assertIn("line_len_1", first)
+        self.assertNotIn("line_len_-1", first)
+        self.assertIn("line_len_-1", second)
+        self.assertIn("line_len_0", second)
+        self.assertNotIn("line_len_1", second)
+
+    def test_empty_section_input_returns_none_without_model_call(self):
+        with patch.object(
+            SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
+            'predict_proba',
+        ) as predictor:
+            self.assertEqual([], list(get_sections('')))
+        predictor.assert_not_called()
+
+    def test_huge_incompatible_section_window_returns_immediately(self):
+        text = 'one\ntwo\nthree\nfour'
+        with patch.object(
+            SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
+            'predict_proba',
+        ) as predictor:
+            detected = list(
+                get_sections(
+                    text,
+                    window_pre=10**7,
+                    window_post=0,
+                )
+            )
+        predictor.assert_not_called()
+        self.assertEqual(detected, [])
 
     def test_custom_underspecified_window_yields_no_ml_section(self):
         text = 'one\ntwo\nthree\nfour'
-        with patch(
-            'lexnlp.nlp.en.segments.sections.'
-            'SectionSegmenterModel.SECTION_SEGMENTER_MODEL.predict_proba',
+        with patch.object(
+            SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
+            'predict_proba',
             return_value=[[0.0, 1.0]] * 4,
         ) as predictor:
-            sections = list(get_sections(text, window_pre=0, window_post=0))
+            detected = list(
+                get_sections(text, window_pre=0, window_post=0)
+            )
         predictor.assert_not_called()
-        self.assertEqual(sections, [])
+        self.assertEqual(detected, [])
 
     def test_same_width_custom_windows_do_not_relabel_section_features(self):
         text = 'one\ntwo\nthree\nfour\nfive\nsix\nseven'
         for window_pre, window_post in ((0, 6), (2, 4), (4, 2), (6, 0)):
             with self.subTest(window_pre=window_pre, window_post=window_post):
-                with patch(
-                    'lexnlp.nlp.en.segments.sections.'
-                    'SectionSegmenterModel.SECTION_SEGMENTER_MODEL.predict_proba',
+                with patch.object(
+                    SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
+                    'predict_proba',
                     return_value=[[0.0, 1.0]] * 7,
                 ) as predictor:
                     detected = list(
@@ -144,21 +205,19 @@ class TestSectionSpans(TestCase):
                 self.assertEqual(detected, [])
 
     def test_four_lines_realise_the_complete_section_model_schema(self):
-        from lexnlp.nlp.en.segments import sections as section_module
-
         text = 'one\ntwo\nthree\nfour'
         lines = text.splitlines()
-        distribution = section_module.build_document_line_distribution(text)
-        columns = section_module.get_section_feature_names(
+        distribution = build_document_line_distribution(text)
+        columns = get_section_feature_names(
             lines_count=len(lines),
             line_window_pre=3,
             line_window_post=3,
             include_doc=distribution,
         )
-        self.assertTrue(section_module.has_compatible_line_window(3, 3))
+        self.assertTrue(has_compatible_line_window(3, 3))
         self.assertTrue(
-            section_module.has_compatible_feature_width(
-                section_module.SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
+            has_compatible_feature_width(
+                SectionSegmenterModel.SECTION_SEGMENTER_MODEL,
                 len(columns),
             )
         )

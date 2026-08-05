@@ -19,7 +19,13 @@ from unittest.mock import patch
 from lexnlp.extract.common.base_path import lexnlp_test_path
 from lexnlp.nlp.en.segments import paragraphs
 from lexnlp.nlp.en.segments.paragraphs import get_paragraph_list, get_paragraph_span_list, splitlines_with_spans
-from lexnlp.nlp.en.segments.utils import build_document_distribution
+from lexnlp.nlp.en.segments.utils import (
+    build_document_distribution,
+    build_document_line_distribution,
+    has_compatible_feature_width,
+    has_compatible_line_window,
+    resolve_model_feature_width,
+)
 from lexnlp.tests import lexnlp_tests
 
 
@@ -96,15 +102,15 @@ class TestParagraphs(TestCase):
     def test_single_line_paragraph_span_starts_at_zero(self):
         text = '2021-01-20T10:32:31.938706'
 
-        # The one-line matrix is narrower than the fitted estimator schema and
-        # must use the deterministic whole-source compatibility fallback.
+        # Force the classifier down the break-at-first-line path which used to
+        # expose a (-1, len(text)) span for single-line documents.
         with patch.object(
             paragraphs.PARAGRAPH_SEGMENTER_MODEL,
             'predict_proba',
             return_value=[[0.0, 1.0]],
         ) as predictor:
             self.assertEqual([(0, len(text), text)], get_paragraph_span_list(text))
-        predictor.assert_not_called()
+        predictor.assert_called_once()
 
     def test_document_distribution_1_lc(self):
         """
@@ -185,19 +191,66 @@ class TestParagraphs(TestCase):
 
     def test_get_paragraphs_too_small_text_with_spans(self):
         text = '\nToo small text\n'
-        for predicted in (
-            [[1.0, 0.0], [0.0, 1.0]],
-            [[0.0, 1.0], [1.0, 0.0]],
-        ):
-            with self.subTest(predicted=predicted):
-                with patch.object(
-                    paragraphs.PARAGRAPH_SEGMENTER_MODEL,
-                    'predict_proba',
-                    return_value=predicted,
-                ) as predictor:
-                    spans = get_paragraph_span_list(text=text)
-                predictor.assert_not_called()
-                self.assertEqual([(0, len(text), text)], spans)
+        spans = get_paragraph_span_list(text=text)
+        self.assertEqual(
+            first=(0, len(text), text),
+            second=spans[0],
+        )
+
+    def test_short_documents_keep_the_full_paragraph_feature_schema(self):
+        for text in ('only', '\nToo small text\n'):
+            with self.subTest(text=text):
+                lines, _spans = splitlines_with_spans(text)
+                distribution = build_document_line_distribution(text)
+                columns = paragraphs.get_paragraph_break_feature_names(
+                    lines_count=len(lines),
+                    line_window_pre=3,
+                    line_window_post=3,
+                    include_doc=distribution,
+                )
+                self.assertEqual(len(columns), 361)
+                self.assertEqual(
+                    len(columns),
+                    resolve_model_feature_width(
+                        paragraphs.PARAGRAPH_SEGMENTER_MODEL
+                    ),
+                )
+
+        lines = ["", "Too small text"]
+        first = paragraphs.build_paragraph_break_features(
+            lines, 0, 3, 3
+        )
+        second = paragraphs.build_paragraph_break_features(
+            lines, 1, 3, 3
+        )
+        self.assertIn("line_len_0", first)
+        self.assertIn("line_len_1", first)
+        self.assertNotIn("line_len_-1", first)
+        self.assertIn("line_len_-1", second)
+        self.assertIn("line_len_0", second)
+        self.assertNotIn("line_len_1", second)
+
+    def test_empty_paragraph_input_returns_no_spans_without_model_call(self):
+        with patch.object(
+            paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+            'predict_proba',
+        ) as predictor:
+            self.assertEqual([], get_paragraph_span_list(''))
+        predictor.assert_not_called()
+
+    def test_huge_incompatible_paragraph_window_falls_back_immediately(self):
+        text = 'one\ntwo\nthree\nfour'
+        with patch.object(
+            paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+            'predict_proba',
+        ) as predictor:
+            spans = get_paragraph_span_list(
+                text,
+                window_pre=10**7,
+                window_post=0,
+            )
+        predictor.assert_not_called()
+        self.assertEqual([(0, len(text), text)], spans)
 
     def test_custom_underspecified_window_uses_paragraph_fallback(self):
         text = 'one\ntwo\nthree\nfour'
@@ -249,42 +302,39 @@ class TestParagraphs(TestCase):
             estimators_=[child_361, child_361],
         )
 
-        self.assertEqual(
-            paragraphs.resolve_model_feature_width(consistent),
-            361,
-        )
-        self.assertTrue(
-            paragraphs.has_compatible_feature_width(consistent, 361)
-        )
-        self.assertFalse(
-            paragraphs.has_compatible_feature_width(consistent, 360)
-        )
-        self.assertIsNone(
-            paragraphs.resolve_model_feature_width(inconsistent)
-        )
-        self.assertIsNone(
-            paragraphs.resolve_model_feature_width(incomplete)
-        )
-        self.assertIsNone(
-            paragraphs.resolve_model_feature_width(contradictory_parent)
-        )
+        self.assertEqual(resolve_model_feature_width(consistent), 361)
+        self.assertTrue(has_compatible_feature_width(consistent, 361))
+        self.assertFalse(has_compatible_feature_width(consistent, 360))
+        self.assertIsNone(resolve_model_feature_width(inconsistent))
+        self.assertIsNone(resolve_model_feature_width(incomplete))
+        self.assertIsNone(resolve_model_feature_width(contradictory_parent))
 
     def test_four_lines_realise_the_complete_paragraph_model_schema(self):
         text = 'one\ntwo\nthree\nfour'
         lines, _spans = splitlines_with_spans(text)
-        distribution = paragraphs.build_document_line_distribution(text)
+        distribution = build_document_line_distribution(text)
         columns = paragraphs.get_paragraph_break_feature_names(
             lines_count=len(lines),
             line_window_pre=3,
             line_window_post=3,
             include_doc=distribution,
         )
-        self.assertTrue(paragraphs.has_compatible_line_window(3, 3))
+        self.assertTrue(has_compatible_line_window(3, 3))
         self.assertTrue(
-            paragraphs.has_compatible_feature_width(
+            has_compatible_feature_width(
                 paragraphs.PARAGRAPH_SEGMENTER_MODEL,
                 len(columns),
             )
+        )
+
+    def test_blank_line_legacy_parity_remains_two_paragraphs(self):
+        text = 'First operative paragraph.\n\nSecond operative paragraph.'
+        self.assertEqual(
+            [
+                'First operative paragraph.\n\n',
+                'Second operative paragraph.',
+            ],
+            get_paragraph_list(text),
         )
 
     def test_date_text(self):

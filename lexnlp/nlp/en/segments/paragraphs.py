@@ -64,13 +64,9 @@ def build_paragraph_break_features(
     # Feature vector
     feature_vector = {}
 
-    # Check start offset
-    if line_id < line_window_pre:
-        line_window_pre = line_id
-
-    # Check final offset
-    if (line_id + line_window_post) >= len(lines):
-        line_window_post = len(lines) - line_window_post - 1
+    # Keep the global schema fixed while clipping unavailable values per row.
+    line_window_pre = min(line_window_pre, line_id)
+    line_window_post = min(line_window_post, len(lines) - line_id - 1)
 
     # Iterate through window
     for i in range(-line_window_pre, line_window_post + 1):
@@ -131,15 +127,12 @@ def get_paragraph_break_feature_names(
         'last_char_number',
     }
 
-    # Check start offset
-    if lines_count - 1 < line_window_pre:
-        line_window_pre = lines_count - 1
+    # The fitted model owns one fixed global offset schema. Missing edge-row
+    # values are filled later; document length must never remove columns.
+    # ``lines_count`` remains in the public signature for compatibility.
+    _ = lines_count
 
-    # Check final offset
-    if line_window_post >= lines_count:
-        line_window_post = lines_count - line_window_post - 1
-
-    # Iterate through window
+    # Iterate through the complete requested window
     for i in range(-line_window_pre, line_window_post + 1):
 
         # Count length
@@ -223,9 +216,16 @@ def get_paragraph_spans(
             The minimum probability a predicted paragraph break must meet in order
             to be considered a valid paragraph break.
     """
-    # Get document character distribution
-    doc_distribution: Dict[str, float] = build_document_line_distribution(text)
     lines, line_spans = splitlines_with_spans(text)
+    if not lines:
+        return
+    if not has_compatible_line_window(window_pre, window_post):
+        if text:
+            yield 0, len(text), text
+        return
+
+    # Get document character distribution only for an eligible model schema.
+    doc_distribution: Dict[str, float] = build_document_line_distribution(text)
     feature_data: List[Dict] = [
         build_paragraph_break_features(
             lines=lines,
@@ -247,15 +247,11 @@ def get_paragraph_spans(
     )
     column_names.sort()
     feature_df: DataFrame = DataFrame(feature_data, columns=column_names).fillna(-1).astype(int)
-    if (
-        not has_compatible_line_window(window_pre, window_post)
-        or not has_compatible_feature_width(
-            PARAGRAPH_SEGMENTER_MODEL,
-            feature_df.shape[1],
-        )
+    if not has_compatible_feature_width(
+        PARAGRAPH_SEGMENTER_MODEL,
+        feature_df.shape[1],
     ):
-        # The historical feature-mismatch fallback is one exact paragraph.
-        # Enforce it before an underspecified matrix can reach a legacy tree.
+        # Preserve the historical model-schema mismatch fallback.
         if text:
             yield 0, len(text), text
         return
