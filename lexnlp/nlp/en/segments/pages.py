@@ -25,7 +25,13 @@ from typing import Generator
 import pandas
 
 # Project imports
-from lexnlp.nlp.en.segments.utils import build_document_distribution
+from lexnlp.nlp.en.segments.utils import (
+    TRAINED_LINE_WINDOW_POST,
+    TRAINED_LINE_WINDOW_PRE,
+    build_document_distribution,
+    has_compatible_feature_width,
+    has_compatible_line_window,
+)
 from lexnlp.utils.unpickler import load_joblib_model
 
 
@@ -50,13 +56,9 @@ def build_page_break_features(lines,
     # Feature vector
     feature_vector = {}
 
-    # Check start offset
-    if line_id < line_window_pre:
-        line_window_pre = line_id
-
-    # Check final offset
-    if (line_id + line_window_post) >= len(lines):
-        line_window_post = len(lines) - line_window_post - 1
+    # Keep the global schema fixed while clipping unavailable values per row.
+    line_window_pre = min(line_window_pre, line_id)
+    line_window_post = min(line_window_post, len(lines) - line_id - 1)
 
     # Iterate through window
     for i in range(-line_window_pre, line_window_post + 1):
@@ -122,15 +124,12 @@ def get_page_break_feature_names(lines_count: int,
         'last_char_number'
     }
 
-    # Check start offset
-    if lines_count - 1 < line_window_pre:
-        line_window_pre = lines_count - 1
+    # The fitted model owns one fixed global offset schema. Missing edge-row
+    # values are filled later; document length must never remove columns.
+    # ``lines_count`` remains in the public signature for compatibility.
+    _ = lines_count
 
-    # Check final offset
-    if line_window_post >= lines_count:
-        line_window_post = lines_count - line_window_post - 1
-
-    # Iterate through window
+    # Iterate through the complete requested window
     for i in range(-line_window_pre, line_window_post + 1):
 
         # Count length
@@ -152,7 +151,12 @@ def get_page_break_feature_names(lines_count: int,
     return feature_vector
 
 
-def get_pages(text, window_pre=3, window_post=3, score_threshold=0.5) -> Generator:
+def get_pages(
+    text,
+    window_pre=TRAINED_LINE_WINDOW_PRE,
+    window_post=TRAINED_LINE_WINDOW_POST,
+    score_threshold=0.5,
+) -> Generator:
     """
     Get pages from text.
     :param text:
@@ -162,9 +166,14 @@ def get_pages(text, window_pre=3, window_post=3, score_threshold=0.5) -> Generat
     :return:
     """
 
-    # Get document character distribution
-    doc_distribution = build_document_distribution(text)
     lines = text.splitlines()
+    if not lines:
+        return
+    if not has_compatible_line_window(window_pre, window_post):
+        return
+
+    # Build features only for the line-offset schema used during training.
+    doc_distribution = build_document_distribution(text)
     test_feature_data = []
     for line_id in range(len(lines)):
         test_feature_data.append(
@@ -176,6 +185,12 @@ def get_pages(text, window_pre=3, window_post=3, score_threshold=0.5) -> Generat
                                                      include_doc=doc_distribution))
     column_names.sort()
     test_feature_df = pandas.DataFrame(test_feature_data, columns=column_names).fillna(-1)
+    if not has_compatible_feature_width(
+        PAGE_SEGMENTER_MODEL,
+        test_feature_df.shape[1],
+    ):
+        return
+
     # Avoid pandas dtype deprecation noise in sklearn validation by passing a numpy array.
     test_predicted_lines = PAGE_SEGMENTER_MODEL.predict_proba(test_feature_df.to_numpy(dtype=float))
     predicted_df = pandas.DataFrame(test_predicted_lines, columns=['prob_false', 'prob_true'])
