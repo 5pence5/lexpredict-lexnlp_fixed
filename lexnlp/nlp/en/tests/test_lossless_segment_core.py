@@ -22,6 +22,8 @@ from lexnlp.nlp.en.segments.hierarchy import (
     segment_document,
 )
 
+from lexnlp.nlp.en.segments.payloads import render_embedding_payload
+
 from lexnlp.nlp.en.segments.chunks import (
     ChunkProvenance,
     ContainerPolicy,
@@ -1461,6 +1463,280 @@ class FinalCoreCorrectionTests(unittest.TestCase):
             [(0, 3, 1), (3, 5, 1)],
         )
         self.assertEqual(reconstruct_chunks(chunks), source)
+
+
+class FinalAlgorithmRegressionTests(unittest.TestCase):
+    def options(self):
+        return {
+            "paragraph_segmenter": whole_paragraph,
+            "sentence_segmenter": whole_sentence,
+            "paragraph_backend_id": "tests.whole-paragraph.v1",
+            "sentence_backend_id": "tests.whole-sentence.v1",
+        }
+
+    def test_root_outline_closes_before_explicit_section_and_payload(self):
+        text = (
+            "1. Root obligation\r\n"
+            "Root body.\r\n"
+            "  SECTION 2 Later\r\n"
+            "Later body.\r\n"
+        )
+        hierarchy = segment_document(text, **self.options())
+        clause = next(hierarchy.segments(SegmentKind.CLAUSE))
+        section = next(hierarchy.segments(SegmentKind.SECTION))
+
+        self.assertEqual(clause.end, section.start)
+        self.assertNotIn(section, tuple(clause.walk()))
+        self.assertEqual(hierarchy.reconstruct(), text)
+
+        chunks = chunk_document(
+            hierarchy,
+            max_chars=1_000,
+            container_policy=ContainerPolicy.PRESERVE,
+        )
+        self.assertEqual(
+            [(chunk.start, chunk.end) for chunk in chunks],
+            [(0, section.start), (section.start, len(text))],
+        )
+        later = chunks[1]
+        payload = render_embedding_payload(
+            later,
+            token_counter=len,
+            tokenizer_id="tests.characters.v1",
+            max_tokens=1_000,
+        )
+        self.assertNotIn("1.", tuple(
+            fragment.text for fragment in payload.context_fragments
+        ))
+
+    def test_nested_outlines_become_siblings_of_later_section(self):
+        text = (
+            "ARTICLE I\r\n"
+            "  1.1 Parent duty\r\n"
+            "  (a) nested item\r\n"
+            "  body\r\n"
+            "  SECTION 2 Later\r\n"
+            "  2.1 Child duty\r\n"
+            "  tail\r\n"
+        )
+        hierarchy = segment_document(text, **self.options())
+        sections = list(hierarchy.segments(SegmentKind.SECTION))
+        clauses = list(hierarchy.segments(SegmentKind.CLAUSE))
+        items = list(hierarchy.segments(SegmentKind.LIST_ITEM))
+        later = next(node for node in sections if node.label == "SECTION 2 Later")
+        parent_clause = next(node for node in clauses if node.label == "1.1")
+        child_clause = next(node for node in clauses if node.label == "2.1")
+
+        self.assertEqual(parent_clause.end, later.start)
+        self.assertEqual(items[0].end, later.start)
+        self.assertNotIn(later, tuple(parent_clause.walk()))
+        self.assertIn(child_clause, tuple(later.walk()))
+        for outline in (*clauses, *items):
+            for section in sections:
+                self.assertFalse(outline.start < section.start < outline.end)
+        self.assertEqual(hierarchy.reconstruct(), text)
+
+        chunks = chunk_document(
+            hierarchy,
+            max_chars=1_000,
+            container_policy=ContainerPolicy.PRESERVE,
+        )
+        self.assertTrue(all(
+            not chunk.start < later.start < chunk.end for chunk in chunks
+        ))
+        self.assertEqual(reconstruct_chunks(chunks), text)
+
+    @staticmethod
+    def overlapping_heading_hierarchy():
+        source = "abcdefghijklmn"
+        outer = Segment(
+            SegmentKind.SECTION,
+            2,
+            12,
+            (
+                Segment(SegmentKind.TEXT, 2, 4),
+                Segment(
+                    SegmentKind.CLAUSE,
+                    4,
+                    10,
+                    attributes=(("heading_end", "6"),),
+                ),
+                Segment(SegmentKind.TEXT, 10, 12),
+            ),
+            attributes=(("heading_end", "12"),),
+        )
+        return DocumentHierarchy.from_segments(
+            source,
+            (
+                Segment(SegmentKind.TEXT, 0, 2),
+                outer,
+                Segment(SegmentKind.TEXT, 12, len(source)),
+            ),
+        )
+
+    def test_heading_fences_are_fresh_relative_and_touching_is_not_merged(self):
+        headings = chunks_core._HeadingIndex(((2, 12), (4, 6)))
+        self.assertEqual(headings.safe_hard_end(0, 8), 2)
+        self.assertEqual(headings.safe_hard_end(2, 5), 4)
+        self.assertEqual(headings.safe_hard_end(4, 5), 5)
+
+        touching = chunks_core._HeadingIndex(((1, 3), (3, 5)))
+        self.assertEqual(touching.safe_hard_end(0, 3), 3)
+
+    def test_heading_index_matches_brute_force_and_arbitrary_ordering(self):
+        intervals = (
+            (1, 5),
+            (3, 7),
+            (4, 6),
+            (4, 9),
+            (6, 8),
+            (8, 10),
+            (10, 10),
+            (12, 14),
+        )
+        headings = chunks_core._HeadingIndex(intervals)
+        for fresh_start in range(15):
+            for boundary in range(15):
+                expected = min(
+                    (
+                        start
+                        for start, end in intervals
+                        if fresh_start < start < boundary < end
+                    ),
+                    default=None,
+                )
+                with self.subTest(
+                    fresh_start=fresh_start,
+                    boundary=boundary,
+                ):
+                    self.assertEqual(
+                        headings._first_crossing_start(
+                            fresh_start,
+                            boundary,
+                        ),
+                        expected,
+                    )
+
+        ordered = list(chunks_core._arbitrary_end_candidates(
+            chunks_core._ArbitraryTokenOracle(
+                "x" * 14,
+                len,
+                max_calls=1,
+                max_input_bytes=1,
+                max_steps=100,
+            ),
+            (0, 2, 4, 6, 8),
+            chunks_core._HeadingIndex(((2, 12), (4, 6))),
+            fresh_start=0,
+            limit=8,
+            respect_boundaries=True,
+        ))
+        self.assertEqual(ordered[:2], [2, 1])
+        self.assertEqual(set(ordered), set(range(1, 9)))
+
+    def test_overlapping_heading_fences_cover_all_planners_and_opt_out(self):
+        hierarchy = self.overlapping_heading_hierarchy()
+        modes = (
+            ("characters", {"max_chars": 3}),
+            (
+                "monotonic",
+                {
+                    "max_tokens": 3,
+                    "token_counter": len,
+                    "token_counter_id": "tests.heading-len.monotonic.v1",
+                    "token_counter_policy": TokenCounterPolicy.MONOTONIC,
+                },
+            ),
+            (
+                "arbitrary",
+                {
+                    "max_tokens": 3,
+                    "token_counter": len,
+                    "token_counter_id": "tests.heading-len.arbitrary.v1",
+                    "token_counter_policy": TokenCounterPolicy.ARBITRARY,
+                },
+            ),
+        )
+        for name, kwargs in modes:
+            with self.subTest(mode=name, boundaries=True):
+                chunks = chunk_document(
+                    hierarchy,
+                    container_policy=ContainerPolicy.PACK_SIBLINGS,
+                    **kwargs,
+                )
+                self.assertEqual([chunk.end for chunk in chunks[:2]], [2, 4])
+                self.assertEqual(reconstruct_chunks(chunks), hierarchy.source)
+            with self.subTest(mode=name, boundaries=False):
+                chunks = chunk_document(
+                    hierarchy,
+                    respect_boundaries=False,
+                    container_policy=ContainerPolicy.PACK_SIBLINGS,
+                    **kwargs,
+                )
+                self.assertEqual(chunks[0].end, 3)
+                self.assertEqual(reconstruct_chunks(chunks), hierarchy.source)
+
+    def test_repeated_two_cell_rows_preempt_competing_structure(self):
+        examples = (
+            "SECTION 1 | Fee\nSECTION 2 | Cap\n",
+            "SECTION 1\tFee\r\nSECTION 2\tCap\r\n",
+            "SECTION 1 | Fee\n| --- | --- |\n",
+        )
+        for text in examples:
+            with self.subTest(text=text):
+                hierarchy = segment_document(text, **self.options())
+                tables = list(hierarchy.segments(SegmentKind.TABLE))
+                self.assertEqual(len(tables), 1)
+                self.assertEqual(
+                    (tables[0].start, tables[0].end, tables[0].text(text)),
+                    (0, len(text), text),
+                )
+                self.assertEqual(
+                    list(hierarchy.segments(SegmentKind.SECTION)),
+                    [],
+                )
+                self.assertEqual(
+                    list(hierarchy.segments(SegmentKind.CLAUSE)),
+                    [],
+                )
+                chunks = chunk_document(
+                    hierarchy,
+                    max_chars=9,
+                    container_policy=ContainerPolicy.PRESERVE,
+                )
+                self.assertTrue(all(chunk.char_count <= 9 for chunk in chunks))
+                self.assertEqual(reconstruct_chunks(chunks), text)
+                self.assertEqual(hierarchy.reconstruct(), text)
+
+    def test_weak_two_cell_row_does_not_borrow_three_cell_evidence(self):
+        text = "SECTION 1 | Fee\nA | B | C\n"
+        hierarchy = segment_document(text, **self.options())
+        tables = list(hierarchy.segments(SegmentKind.TABLE))
+        sections = list(hierarchy.segments(SegmentKind.SECTION))
+
+        self.assertEqual(len(tables), 1)
+        self.assertEqual(tables[0].text(text), "A | B | C\n")
+        self.assertEqual(
+            [section.label for section in sections],
+            ["SECTION 1 | Fee"],
+        )
+        self.assertEqual(hierarchy.reconstruct(), text)
+
+    def test_weak_delimited_rows_require_consistent_adjacent_evidence(self):
+        examples = (
+            "SECTION 1 | Fee\n",
+            "SECTION 1 | Fee\n\nSECTION 2 | Cap\n",
+            "SECTION 1 | Fee\nSECTION 2\tCap\n",
+            "SECTION 1 |\nSECTION 2 |\n",
+        )
+        for text in examples:
+            with self.subTest(text=text):
+                hierarchy = segment_document(text, **self.options())
+                self.assertEqual(
+                    list(hierarchy.segments(SegmentKind.TABLE)),
+                    [],
+                )
+                self.assertEqual(hierarchy.reconstruct(), text)
 
 
 if __name__ == "__main__":

@@ -636,35 +636,65 @@ def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
 
 
 class _HeadingIndex:
-    """Bisect-backed heading containment checks used by every chunk."""
+    """Fresh-relative heading fences with logarithmic crossing queries."""
 
     def __init__(self, intervals: Iterable[tuple[int, int]]) -> None:
-        ordered = tuple(sorted(set(intervals)))
+        longest_by_start: dict[int, int] = {}
+        for start, end in intervals:
+            if end <= start:
+                continue
+            longest_by_start[start] = max(end, longest_by_start.get(start, end))
+        ordered = tuple(sorted(longest_by_start.items()))
         self.intervals = ordered
         self.starts = tuple(start for start, _end in ordered)
         self.ends = tuple(end for _start, end in ordered)
 
-    def containing(self, position: int) -> tuple[int, int] | None:
-        index = bisect.bisect_right(self.starts, position) - 1
-        if (
-            index >= 0
-            and self.starts[index] < position < self.ends[index]
-        ):
-            return self.starts[index], self.ends[index]
-        return None
+        tree_size = 1
+        while tree_size < len(ordered):
+            tree_size *= 2
+        self._tree_size = tree_size
+        max_ends = [-1] * (tree_size * 2)
+        for index, end in enumerate(self.ends):
+            max_ends[tree_size + index] = end
+        for index in range(tree_size - 1, 0, -1):
+            max_ends[index] = max(max_ends[index * 2], max_ends[index * 2 + 1])
+        self._max_ends = tuple(max_ends)
+
+    def _first_crossing_start(
+        self,
+        fresh_start: int,
+        boundary: int,
+    ) -> int | None:
+        """Find the earliest heading newly crossed by this chunk endpoint."""
+        left = bisect.bisect_right(self.starts, fresh_start)
+        right = bisect.bisect_left(self.starts, boundary)
+        if left >= right:
+            return None
+
+        def find_first(node: int, node_start: int, node_end: int) -> int | None:
+            if (
+                node_end <= left
+                or right <= node_start
+                or self._max_ends[node] <= boundary
+            ):
+                return None
+            if node_end - node_start == 1:
+                return node_start
+            middle = (node_start + node_end) // 2
+            found = find_first(node * 2, node_start, middle)
+            if found is not None:
+                return found
+            return find_first(node * 2 + 1, middle, node_end)
+
+        index = find_first(1, 0, self._tree_size)
+        return None if index is None else self.starts[index]
 
     def safe_hard_end(self, fresh_start: int, hard_end: int) -> int:
-        containing = self.containing(hard_end)
-        if containing is None:
-            return hard_end
-        heading_start, _heading_end = containing
-        if heading_start > fresh_start:
-            return heading_start
-        # An individually oversized heading must be hard-split.
-        return hard_end
+        crossing_start = self._first_crossing_start(fresh_start, hard_end)
+        return hard_end if crossing_start is None else crossing_start
 
-    def is_safe(self, boundary: int) -> bool:
-        return self.containing(boundary) is None
+    def is_safe(self, fresh_start: int, boundary: int) -> bool:
+        return self._first_crossing_start(fresh_start, boundary) is None
 
 
 def _boundary_end(
@@ -684,7 +714,7 @@ def _boundary_end(
         candidate = boundaries[position]
         if candidate <= fresh_start:
             break
-        if headings.is_safe(candidate):
+        if headings.is_safe(fresh_start, candidate):
             return candidate
     return hard_end
 
@@ -835,7 +865,7 @@ def _token_end(
         if boundary <= fresh_start:
             break
         if (
-            headings.is_safe(boundary)
+            headings.is_safe(fresh_start, boundary)
             and cache.count(context_start, boundary) <= budget
         ):
             candidate = boundary
@@ -973,7 +1003,7 @@ def _arbitrary_end_candidates(
         if candidate <= fresh_start:
             break
         oracle.step()
-        if headings.is_safe(candidate):
+        if headings.is_safe(fresh_start, candidate):
             yield candidate
 
     # Then every other heading-safe endpoint, without allocating an O(n) list.
@@ -981,14 +1011,14 @@ def _arbitrary_end_candidates(
         oracle.step()
         if (
             not _registered_boundary(boundaries, candidate)
-            and headings.is_safe(candidate)
+            and headings.is_safe(fresh_start, candidate)
         ):
             yield candidate
 
     # An individually oversized heading must still be strictly splittable.
     for candidate in range(limit, fresh_start, -1):
         oracle.step()
-        if not headings.is_safe(candidate):
+        if not headings.is_safe(fresh_start, candidate):
             yield candidate
 
 

@@ -7,6 +7,7 @@ layout backends without importing them.
 
 from __future__ import annotations
 
+import bisect
 import hashlib
 import re
 from collections.abc import Callable, Iterable, Iterator, Sequence
@@ -450,6 +451,71 @@ def _split_lines(text: str) -> list[_Line]:
     return result
 
 
+def _delimited_row_shape(line: _Line) -> tuple[str, int] | None:
+    """Return delimiter kind and non-empty semantic cell count for one row."""
+    pipe_count = line.content.count("|")
+    tab_count = line.content.count("\t")
+    if pipe_count and not tab_count:
+        delimiter = "|"
+    elif tab_count and not pipe_count:
+        delimiter = "\t"
+    else:
+        return None
+    cells = [cell.strip() for cell in line.content.split(delimiter)]
+    if cells and not cells[0]:
+        cells.pop(0)
+    if cells and not cells[-1]:
+        cells.pop()
+    if len(cells) < 2 or not all(cells):
+        return None
+    return delimiter, len(cells)
+
+
+def _delimited_blocks(
+    lines: Sequence[_Line],
+) -> tuple[list[tuple[int, int]], set[int]]:
+    """Classify table rows once, before any competing structural detector.
+
+    Rows with the historical strong evidence (at least two pipe or tab
+    delimiters) remain tables on their own.  A one-delimiter/two-cell row is
+    weaker evidence and is promoted only by an adjacent row with the same
+    delimiter and semantic cell count, including a strong Markdown-style row.
+    """
+    table_lines = {
+        line.index
+        for line in lines
+        if line.content.count("|") >= 2 or line.content.count("\t") >= 2
+    }
+    row_shapes = tuple(_delimited_row_shape(line) for line in lines)
+    index = 0
+    while index < len(lines):
+        shape = row_shapes[index]
+        if shape is None:
+            index += 1
+            continue
+        run_start = index
+        index += 1
+        while index < len(lines) and row_shapes[index] == shape:
+            index += 1
+        if index - run_start >= 2:
+            table_lines.update(
+                lines[position].index for position in range(run_start, index)
+            )
+
+    blocks: list[tuple[int, int]] = []
+    index = 0
+    while index < len(lines):
+        if lines[index].index not in table_lines:
+            index += 1
+            continue
+        start_index = index
+        index += 1
+        while index < len(lines) and lines[index].index in table_lines:
+            index += 1
+        blocks.append((lines[start_index].start, lines[index - 1].end))
+    return blocks, table_lines
+
+
 def _number_parts(number: str) -> tuple[str, ...]:
     return tuple(
         part.casefold()
@@ -531,6 +597,7 @@ def _sequence_numbered_heading_indices(
 def _heading_candidates(
     lines: Sequence[_Line],
     profile: StructureProfile,
+    table_lines: set[int],
 ) -> tuple[list[_Heading], set[int]]:
     numeric: list[_NumericCandidate] = []
     numeric_matches: dict[int, re.Match[str]] = {}
@@ -543,10 +610,9 @@ def _heading_candidates(
     for line in lines:
         if not line.stripped:
             continue
-        # Delimited rows belong to table evidence.  A leading cell such as
-        # "2." or "SECTION 2" must not also become a heading whose scope
-        # crosses the surrounding table block.
-        if line.stripped.count("|") >= 2 or line.content.count("\t") >= 2:
+        # Table evidence is classified before headings so a leading cell such
+        # as "2." or "SECTION 2" cannot acquire a competing structural scope.
+        if line.index in table_lines:
             continue
         explicit = _EXPLICIT_HEADING_RE.match(line.content)
         if explicit:
@@ -594,8 +660,7 @@ def _heading_candidates(
         if match is None:
             if (
                 line.index == first_content_index
-                and line.stripped.count("|") < 2
-                and line.content.count("\t") < 2
+                and line.index not in table_lines
                 and _is_initial_document_title(line.stripped)
             ):
                 headings.append(
@@ -702,8 +767,9 @@ def _section_spans(
     text: str,
     lines: Sequence[_Line],
     profile: StructureProfile,
+    table_lines: set[int],
 ) -> tuple[list[StructuralSpan], set[int]]:
-    headings, heading_lines = _heading_candidates(lines, profile)
+    headings, heading_lines = _heading_candidates(lines, profile, table_lines)
     _assign_heading_levels(headings, len(text))
     spans = [
         StructuralSpan(
@@ -728,6 +794,7 @@ def _outline_spans(
     lines: Sequence[_Line],
     sections: Sequence[StructuralSpan],
     heading_lines: set[int],
+    table_lines: set[int],
 ) -> list[StructuralSpan]:
     sorted_sections = sorted(sections, key=lambda span: (span.start, -span.end))
     next_section = 0
@@ -753,9 +820,7 @@ def _outline_spans(
         if line.index in heading_lines or not line.stripped:
             continue
         # Delimited table rows own their line-level structural evidence.
-        # Treating a leading cell such as "2." as an outline marker can make
-        # one table block cross two clause scopes.
-        if line.stripped.count("|") >= 2 or line.content.count("\t") >= 2:
+        if line.index in table_lines:
             continue
         list_match = _LIST_RE.match(line.content)
         clause_match = _CLAUSE_RE.match(line.content)
@@ -819,31 +884,28 @@ def _outline_spans(
                         (("heading_end", str(line.content_end)),),
                     )
                 )
+    # A builtin outline marker never owns a later section heading.  Cap every
+    # open clause/list scope at the nearest such heading without rescanning the
+    # section list for each marker.
+    section_starts = tuple(sorted({section.start for section in sections}))
+    if section_starts:
+        for index, span in enumerate(result):
+            position = bisect.bisect_right(section_starts, span.start)
+            if (
+                position < len(section_starts)
+                and section_starts[position] < span.end
+            ):
+                result[index] = replace(
+                    span,
+                    end=section_starts[position],
+                )
     return result
 
 
 def _table_spans(
-    lines: Sequence[_Line],
+    blocks: Sequence[tuple[int, int]],
     containers: Sequence[StructuralSpan],
 ) -> list[StructuralSpan]:
-    blocks: list[tuple[int, int]] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
-        is_table = line.stripped.count("|") >= 2 or line.content.count("\t") >= 2
-        if not is_table:
-            index += 1
-            continue
-        start_index = index
-        index += 1
-        while index < len(lines):
-            following = lines[index]
-            if following.stripped.count("|") >= 2 or following.content.count("\t") >= 2:
-                index += 1
-            else:
-                break
-        blocks.append((lines[start_index].start, lines[index - 1].end))
-
     # Both inputs are source ordered and the structural containers are
     # laminar.  Sweep each container once rather than rescanning C containers
     # for every one of T tables.
@@ -894,9 +956,21 @@ def _builtin_structural_spans(
     profile: StructureProfile,
 ) -> tuple[StructuralSpan, ...]:
     lines = _split_lines(text)
-    sections, heading_lines = _section_spans(text, lines, profile)
-    outlines = _outline_spans(text, lines, sections, heading_lines)
-    tables = _table_spans(lines, (*sections, *outlines))
+    table_blocks, table_lines = _delimited_blocks(lines)
+    sections, heading_lines = _section_spans(
+        text,
+        lines,
+        profile,
+        table_lines,
+    )
+    outlines = _outline_spans(
+        text,
+        lines,
+        sections,
+        heading_lines,
+        table_lines,
+    )
+    tables = _table_spans(table_blocks, (*sections, *outlines))
     spans = (*sections, *outlines, *tables)
     return tuple(sorted(spans, key=lambda span: (span.start, -span.end, span.kind.value)))
 
