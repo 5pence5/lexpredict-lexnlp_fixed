@@ -1739,5 +1739,362 @@ class FinalAlgorithmRegressionTests(unittest.TestCase):
                 self.assertEqual(hierarchy.reconstruct(), text)
 
 
+class OverlapStructureRegressionTests(unittest.TestCase):
+    """Overlap is advisory when fresh content starts at a fitting structure."""
+
+    def options(self):
+        return {
+            "paragraph_segmenter": whole_paragraph,
+            "sentence_segmenter": whole_sentence,
+            "paragraph_backend_id": "tests.whole-paragraph.v1",
+            "sentence_backend_id": "tests.whole-sentence.v1",
+        }
+
+    @staticmethod
+    def character_and_monotonic_modes():
+        return (
+            (
+                "characters",
+                {
+                    "max_chars": 15,
+                    "overlap_chars": 8,
+                },
+            ),
+            (
+                "monotonic",
+                {
+                    "max_tokens": 15,
+                    "overlap_tokens": 8,
+                    "token_counter": len,
+                    "token_counter_id": "tests.structure-len.monotonic.v1",
+                    "token_counter_policy": TokenCounterPolicy.MONOTONIC,
+                },
+            ),
+        )
+
+    def assert_integrity(self, chunks, source, budget):
+        self.assertEqual(reconstruct_chunks(chunks), source)
+        expected_fresh_start = 0
+        for index, chunk in enumerate(chunks):
+            self.assertEqual(chunk.index, index)
+            self.assertEqual(chunk.new_content_start, expected_fresh_start)
+            self.assertEqual(chunk.text, source[chunk.start:chunk.end])
+            self.assertEqual(
+                chunk.content,
+                source[chunk.new_content_start:chunk.end],
+            )
+            self.assertLessEqual(chunk.unit_count, budget)
+            expected_fresh_start = chunk.end
+        self.assertEqual(expected_fresh_start, len(source))
+
+    @staticmethod
+    def protected_hierarchy(kind, length=15):
+        source = "A" * 15 + "B" * length
+        return DocumentHierarchy.from_segments(
+            source,
+            (
+                Segment(SegmentKind.TEXT, 0, 15),
+                Segment(kind, 15, len(source)),
+            ),
+        )
+
+    def test_fitting_section_drops_overlap_in_every_planner(self):
+        source = "SECTION 1\nAAAA\nSECTION 2\nBBBB\n"
+        hierarchy = segment_document(source, **self.options())
+        modes = (
+            *self.character_and_monotonic_modes(),
+            (
+                "arbitrary",
+                {
+                    "max_tokens": 15,
+                    "overlap_tokens": 8,
+                    "token_counter": len,
+                    "token_counter_id": "tests.fitting-section.arbitrary.v1",
+                    "token_counter_policy": TokenCounterPolicy.ARBITRARY,
+                },
+            ),
+        )
+        for name, kwargs in modes:
+            with self.subTest(mode=name):
+                chunks = chunk_document(
+                    hierarchy,
+                    container_policy=ContainerPolicy.PACK_SIBLINGS,
+                    **kwargs,
+                )
+                self.assertEqual(
+                    [
+                        (chunk.start, chunk.new_content_start, chunk.end)
+                        for chunk in chunks
+                    ],
+                    [(0, 0, 15), (15, 15, 30)],
+                )
+                self.assert_integrity(chunks, source, 15)
+                second = chunks[1]
+                self.assertEqual(second.overlap_provenance.segments, ())
+                self.assertEqual(
+                    second.content_provenance.section_labels,
+                    ("SECTION 2",),
+                )
+
+    def test_prebuilt_clause_and_table_drop_overlap_when_they_fit(self):
+        for kind in (SegmentKind.CLAUSE, SegmentKind.TABLE):
+            with self.subTest(kind=kind):
+                hierarchy = self.protected_hierarchy(kind)
+                chunks = chunk_document(
+                    hierarchy,
+                    max_chars=15,
+                    overlap_chars=8,
+                    container_policy=ContainerPolicy.PACK_SIBLINGS,
+                )
+                self.assertEqual(
+                    [
+                        (chunk.start, chunk.new_content_start, chunk.end)
+                        for chunk in chunks
+                    ],
+                    [(0, 0, 15), (15, 15, 30)],
+                )
+                self.assert_integrity(chunks, hierarchy.source, 15)
+                self.assertEqual(chunks[1].overlap_provenance.segments, ())
+                self.assertIn(
+                    kind,
+                    {
+                        reference.kind
+                        for reference in chunks[1].content_provenance.segments
+                    },
+                )
+
+    def test_oversized_structure_still_splits_and_retains_overlap(self):
+        hierarchy = self.protected_hierarchy(SegmentKind.SECTION, length=16)
+        chunks = chunk_document(
+            hierarchy,
+            max_chars=15,
+            overlap_chars=8,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+        )
+        self.assertEqual(
+            (chunks[1].start, chunks[1].new_content_start, chunks[1].end),
+            (7, 15, 22),
+        )
+        self.assertGreater(chunks[1].overlap_char_count, 0)
+        self.assertLess(chunks[1].end, len(hierarchy.source))
+        self.assert_integrity(chunks, hierarchy.source, 15)
+
+    def test_fitting_heading_without_child_boundary_keeps_maximum_coverage(self):
+        source = "A" * 15 + "B" * 16
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (
+                Segment(SegmentKind.TEXT, 0, 15),
+                Segment(
+                    SegmentKind.SECTION,
+                    15,
+                    31,
+                    attributes=(("heading_end", "24"),),
+                ),
+            ),
+        )
+        for name, kwargs in self.character_and_monotonic_modes():
+            with self.subTest(mode=name):
+                chunks = chunk_document(
+                    hierarchy,
+                    container_policy=ContainerPolicy.PACK_SIBLINGS,
+                    **kwargs,
+                )
+                self.assertEqual(
+                    (chunks[1].start, chunks[1].new_content_start, chunks[1].end),
+                    (15, 15, 30),
+                )
+                self.assertLess(chunks[1].end, len(source))
+                self.assertEqual(chunks[1].overlap_provenance.segments, ())
+                self.assert_integrity(chunks, source, 15)
+
+    def test_internal_child_boundary_cannot_split_a_fitting_heading(self):
+        source = "A" * 15 + "B" * 16
+        section = Segment(
+            SegmentKind.SECTION,
+            15,
+            31,
+            (
+                Segment(SegmentKind.TEXT, 15, 20),
+                Segment(SegmentKind.TEXT, 20, 31),
+            ),
+            attributes=(("heading_end", "24"),),
+        )
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (Segment(SegmentKind.TEXT, 0, 15), section),
+        )
+        for name, kwargs in self.character_and_monotonic_modes():
+            with self.subTest(mode=name):
+                chunks = chunk_document(
+                    hierarchy,
+                    container_policy=ContainerPolicy.PACK_SIBLINGS,
+                    **kwargs,
+                )
+                self.assertEqual(
+                    (chunks[1].start, chunks[1].new_content_start, chunks[1].end),
+                    (15, 15, 24),
+                )
+                self.assertEqual(chunks[1].overlap_provenance.segments, ())
+                self.assert_integrity(chunks, source, 15)
+
+    def test_later_crossing_heading_fence_wins_after_overlap_is_dropped(self):
+        source = "A" * 15 + "B" * 25
+        section = Segment(
+            SegmentKind.SECTION,
+            15,
+            40,
+            (
+                Segment(SegmentKind.TEXT, 15, 25),
+                Segment(
+                    SegmentKind.CLAUSE,
+                    25,
+                    35,
+                    attributes=(("heading_end", "35"),),
+                ),
+                Segment(SegmentKind.TEXT, 35, 40),
+            ),
+            attributes=(("heading_end", "30"),),
+        )
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (Segment(SegmentKind.TEXT, 0, 15), section),
+        )
+        for name, kwargs in self.character_and_monotonic_modes():
+            with self.subTest(mode=name):
+                chunks = chunk_document(
+                    hierarchy,
+                    container_policy=ContainerPolicy.PACK_SIBLINGS,
+                    **kwargs,
+                )
+                self.assertEqual(
+                    (chunks[1].start, chunks[1].new_content_start, chunks[1].end),
+                    (15, 15, 25),
+                )
+                self.assertEqual(chunks[1].overlap_provenance.segments, ())
+                self.assert_integrity(chunks, source, 15)
+
+    def test_none_overlap_plan_still_recovers_a_fitting_heading(self):
+        source = "A" * 15 + "X" + "b" * 14 + "Y"
+        section = Segment(
+            SegmentKind.SECTION,
+            15,
+            31,
+            (
+                Segment(SegmentKind.TEXT, 15, 20),
+                Segment(SegmentKind.TEXT, 20, 31),
+            ),
+            attributes=(("heading_end", "24"),),
+        )
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (Segment(SegmentKind.TEXT, 0, 15), section),
+        )
+
+        def weighted_counter(text):
+            weights = {"A": 1, "X": 8, "Y": 8}
+            return sum(weights.get(character, 0) for character in text)
+
+        chunks = chunk_document(
+            hierarchy,
+            max_tokens=15,
+            overlap_tokens=8,
+            token_counter=weighted_counter,
+            token_counter_id="tests.weighted-monotonic.v1",
+            token_counter_policy=TokenCounterPolicy.MONOTONIC,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+        )
+        self.assertEqual(
+            (chunks[1].start, chunks[1].new_content_start, chunks[1].end),
+            (15, 15, 24),
+        )
+        self.assertEqual(chunks[1].unit_count, 8)
+        self.assertEqual(chunks[1].overlap_provenance.segments, ())
+        self.assert_integrity(chunks, source, 15)
+
+    def test_raw_opt_out_and_unstructured_content_keep_ordinary_overlap(self):
+        cases = (
+            (
+                "raw protected",
+                self.protected_hierarchy(SegmentKind.SECTION),
+                False,
+            ),
+            (
+                "ordinary",
+                DocumentHierarchy.from_segments(
+                    "A" * 30,
+                    (Segment(SegmentKind.TEXT, 0, 30),),
+                ),
+                True,
+            ),
+        )
+        for name, hierarchy, respect_boundaries in cases:
+            with self.subTest(case=name):
+                chunks = chunk_document(
+                    hierarchy,
+                    max_chars=15,
+                    overlap_chars=8,
+                    respect_boundaries=respect_boundaries,
+                    container_policy=ContainerPolicy.PACK_SIBLINGS,
+                )
+                self.assertEqual(
+                    (chunks[1].start, chunks[1].new_content_start, chunks[1].end),
+                    (7, 15, 22),
+                )
+                self.assertEqual(chunks[1].overlap_char_count, 8)
+                self.assert_integrity(chunks, hierarchy.source, 15)
+
+    def test_same_start_queries_choose_the_longest_fitting_end_logarithmically(self):
+        source = "A" * 15 + "B" * 15
+        nested = Segment(
+            SegmentKind.SECTION,
+            15,
+            30,
+            (
+                Segment(
+                    SegmentKind.CLAUSE,
+                    15,
+                    24,
+                    attributes=(("heading_end", "20"),),
+                ),
+                Segment(SegmentKind.TEXT, 24, 30),
+            ),
+        )
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (Segment(SegmentKind.TEXT, 0, 15), nested),
+        )
+        index = chunks_core._HierarchyIndex(hierarchy)
+        self.assertEqual(index.structure_ends_at(15), (20, 24, 30))
+        self.assertEqual(index.fitting_structure_end(15, 19), None)
+        self.assertEqual(index.fitting_structure_end(15, 24), 24)
+        self.assertEqual(index.fitting_structure_end(15, 30), 30)
+
+        calls = 0
+
+        class DenseIndex:
+            @staticmethod
+            def structure_ends_at(_start):
+                return tuple(range(1, 1_025))
+
+        def counter(text):
+            nonlocal calls
+            calls += 1
+            return len(text)
+
+        self.assertEqual(
+            chunks_core._fitting_token_structure_end(
+                DenseIndex(),
+                "x" * 1_024,
+                counter,
+                fresh_start=0,
+                limit=1_024,
+                budget=700,
+            ),
+            (700, 700),
+        )
+        self.assertLessEqual(calls, 11)
+
+
 if __name__ == "__main__":
     unittest.main()

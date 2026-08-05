@@ -506,6 +506,13 @@ class DocumentChunk:
 _TOKEN_RE = re.compile(r"\w+|[^\w\s]", re.UNICODE)
 
 
+_PROTECTED_KINDS = {
+    SegmentKind.SECTION,
+    SegmentKind.CLAUSE,
+    SegmentKind.TABLE,
+}
+
+
 def count_tokens(text: str) -> int:
     if not isinstance(text, str):
         raise TypeError("text must be a string")
@@ -519,12 +526,15 @@ class _HierarchyIndex:
         stack = [hierarchy.root]
         boundaries = {0, len(hierarchy.source)}
         heading_intervals: set[tuple[int, int]] = set()
+        structure_ends: dict[int, set[int]] = {}
         while stack:
             node = stack.pop()
             self._child_ends[id(node)] = tuple(child.end for child in node.children)
             if node.kind is not SegmentKind.DOCUMENT:
                 boundaries.add(node.start)
                 boundaries.add(node.end)
+                if node.kind in _PROTECTED_KINDS:
+                    structure_ends.setdefault(node.start, set()).add(node.end)
                 for name, value in node.attributes:
                     if name == "heading_end":
                         try:
@@ -533,9 +543,24 @@ class _HierarchyIndex:
                             continue
                         if node.start < heading_end <= node.end:
                             heading_intervals.add((node.start, heading_end))
+                            structure_ends.setdefault(node.start, set()).add(
+                                heading_end
+                            )
             stack.extend(reversed(node.children))
         self.boundaries = tuple(sorted(boundaries))
         self.headings = _HeadingIndex(heading_intervals)
+        self._structure_ends = {
+            start: tuple(sorted(ends))
+            for start, ends in structure_ends.items()
+        }
+
+    def structure_ends_at(self, start: int) -> tuple[int, ...]:
+        return self._structure_ends.get(start, ())
+
+    def fitting_structure_end(self, start: int, limit: int) -> int | None:
+        ends = self.structure_ends_at(start)
+        position = bisect.bisect_right(ends, limit)
+        return None if position == 0 else ends[position - 1]
 
     def references(self, start: int, end: int) -> tuple[SegmentReference, ...]:
         if start >= end:
@@ -561,13 +586,6 @@ class _HierarchyIndex:
             for child_index in range(stop - 1, first - 1, -1):
                 stack.append(node.children[child_index])
         return tuple(result)
-
-
-_PROTECTED_KINDS = {
-    SegmentKind.SECTION,
-    SegmentKind.CLAUSE,
-    SegmentKind.TABLE,
-}
 
 
 def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
@@ -745,6 +763,32 @@ class _TokenCountCache:
             self.values.clear()
         self.values[key] = value
         return value
+
+
+def _fitting_token_structure_end(
+    index: _HierarchyIndex,
+    source: str,
+    counter: TokenCounter,
+    *,
+    fresh_start: int,
+    limit: int,
+    budget: int,
+) -> tuple[int, int] | None:
+    """Return the longest same-start structure fitting a monotonic budget."""
+    ends = index.structure_ends_at(fresh_start)
+    high = bisect.bisect_right(ends, limit)
+    low = 0
+    cache = _TokenCountCache(source, counter)
+    while low < high:
+        middle = (low + high) // 2
+        if cache.count(fresh_start, ends[middle]) <= budget:
+            low = middle + 1
+        else:
+            high = middle
+    if low == 0:
+        return None
+    end = ends[low - 1]
+    return end, cache.count(fresh_start, end)
 
 
 def _token_context_start(
@@ -1454,6 +1498,29 @@ def iter_chunks(
                     hard_end=hard_end,
                     respect_boundaries=respect_boundaries,
                 )
+                if respect_boundaries and context_start != fresh_start:
+                    fitting_end = hierarchy_index.fitting_structure_end(
+                        fresh_start,
+                        min(unit_end, fresh_start + budget),
+                    )
+                    if fitting_end is not None and end < fitting_end:
+                        context_start = fresh_start
+                        hard_end = min(unit_end, fresh_start + budget)
+                        end = _boundary_end(
+                            hierarchy_index.boundaries,
+                            hierarchy_index.headings,
+                            fresh_start=fresh_start,
+                            hard_end=hard_end,
+                            respect_boundaries=respect_boundaries,
+                        )
+                        if (
+                            end < fitting_end
+                            and hierarchy_index.headings.is_safe(
+                                fresh_start,
+                                fitting_end,
+                            )
+                        ):
+                            end = fitting_end
                 if end <= fresh_start:
                     context_start = fresh_start
                     hard_end = min(unit_end, context_start + budget)
@@ -1491,6 +1558,43 @@ def iter_chunks(
                     budget=budget,
                     respect_boundaries=respect_boundaries,
                 )
+                if (
+                    respect_boundaries
+                    and context_start != fresh_start
+                ):
+                    fitting = _fitting_token_structure_end(
+                        hierarchy_index,
+                        source,
+                        token_counter,
+                        fresh_start=fresh_start,
+                        limit=unit_end,
+                        budget=budget,
+                    )
+                    if fitting is not None and (
+                        planned is None or planned[0] < fitting[0]
+                    ):
+                        fitting_end, fitting_count = fitting
+                        context_start = fresh_start
+                        planned = _token_end(
+                            source,
+                            token_counter,
+                            hierarchy_index.boundaries,
+                            hierarchy_index.headings,
+                            context_start=context_start,
+                            fresh_start=fresh_start,
+                            limit=unit_end,
+                            budget=budget,
+                            respect_boundaries=respect_boundaries,
+                        )
+                        if (
+                            planned is not None
+                            and planned[0] < fitting_end
+                            and hierarchy_index.headings.is_safe(
+                                fresh_start,
+                                fitting_end,
+                            )
+                        ):
+                            planned = fitting_end, fitting_count
                 if planned is None and context_start != fresh_start:
                     context_start = fresh_start
                     planned = _token_end(
