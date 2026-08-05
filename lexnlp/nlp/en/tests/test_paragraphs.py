@@ -337,6 +337,73 @@ class TestParagraphs(TestCase):
             get_paragraph_list(text),
         )
 
+    def test_blank_line_ownership_overrides_conflicting_model_breaks(self):
+        text = 'First.\n\nSecond.'
+        with patch.object(
+            paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+            'predict_proba',
+            return_value=[
+                [1.0, 0.0],
+                [0.0, 1.0],
+                [0.0, 1.0],
+            ],
+        ):
+            paragraphs_found = get_paragraph_span_list(text)
+        self.assertEqual(
+            [
+                (0, 8, 'First.\n\n'),
+                (8, len(text), 'Second.'),
+            ],
+            paragraphs_found,
+        )
+        self.assertEqual(
+            text,
+            ''.join(item[2] for item in paragraphs_found),
+        )
+
+    def test_leading_and_trailing_blank_runs_remain_source_owned(self):
+        cases = (
+            (
+                '\n\nFirst.',
+                [[0.0, 1.0], [0.0, 1.0], [0.0, 1.0]],
+            ),
+            (
+                'First.\n\n',
+                [[1.0, 0.0], [0.0, 1.0]],
+            ),
+        )
+        for text, predicted in cases:
+            with self.subTest(text=text):
+                with patch.object(
+                    paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+                    'predict_proba',
+                    return_value=predicted,
+                ):
+                    self.assertEqual(
+                        [(0, len(text), text)],
+                        get_paragraph_span_list(text),
+                    )
+
+    def test_multiple_whitespace_only_lines_form_one_internal_separator(self):
+        text = 'First.\r\n \t\r\n\r\nSecond.'
+        lines, spans = splitlines_with_spans(text)
+        self.assertEqual(len(lines), 4)
+        with patch.object(
+            paragraphs.PARAGRAPH_SEGMENTER_MODEL,
+            'predict_proba',
+            return_value=[[0.0, 1.0]] * len(lines),
+        ):
+            paragraphs_found = get_paragraph_span_list(text)
+        second_start = spans[-1][0]
+        self.assertEqual(
+            [
+                (0, second_start, text[:second_start]),
+                (second_start, len(text), text[second_start:]),
+            ],
+            paragraphs_found,
+        )
+        self.assertEqual(text, ''.join(item[2] for item in paragraphs_found))
+
     def test_date_text(self):
         text = '2021-01-20T10:32:31.938706'
         ps = get_paragraph_list(text=text)

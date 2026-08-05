@@ -176,6 +176,60 @@ def splitlines_with_spans(text: str) -> Tuple[List[str], List[Tuple[int, int]]]:
     return lines, spans
 
 
+def _normalise_paragraph_breaks(
+    lines: List[str],
+    predicted_breaks: List[int],
+) -> List[int]:
+    """Apply deterministic ownership for blank-line separator runs.
+
+    Leading separators belong to the first content paragraph, trailing
+    separators to the last, and an internal separator run belongs to the
+    preceding paragraph. Therefore an internal run creates exactly one break
+    at the following nonblank line, regardless of model scores inside the run.
+    """
+
+    breaks = set(predicted_breaks)
+    seen_content = False
+    blank_start: Optional[int] = None
+
+    for line_id, line in enumerate(lines):
+        if not line.strip():
+            if blank_start is None:
+                blank_start = line_id
+            continue
+
+        if blank_start is not None:
+            if seen_content:
+                breaks.difference_update(range(blank_start, line_id))
+                breaks.add(line_id)
+            else:
+                # A leading run and its first content line form one paragraph.
+                breaks.difference_update(range(blank_start, line_id + 1))
+            blank_start = None
+        seen_content = True
+
+    if blank_start is not None:
+        # Never strand a trailing separator run in a filtered blank paragraph.
+        breaks.difference_update(range(blank_start, len(lines)))
+
+    content_prefix = [0]
+    for line in lines:
+        content_prefix.append(content_prefix[-1] + int(bool(line.strip())))
+
+    accepted: List[int] = []
+    previous = 0
+    for boundary in sorted(breaks):
+        if boundary <= 0 or boundary >= len(lines):
+            continue
+        if not lines[boundary].strip():
+            continue
+        if content_prefix[boundary] == content_prefix[previous]:
+            continue
+        accepted.append(boundary)
+        previous = boundary
+    return accepted
+
+
 def _form_potential_paragraph(
     pos0: int,
     pos1: Optional[int],
@@ -260,7 +314,11 @@ def get_paragraph_spans(
         # Avoid pandas dtype deprecation noise in sklearn validation by passing a numpy array.
         predicted_lines = PARAGRAPH_SEGMENTER_MODEL.predict_proba(feature_df.to_numpy())
         predicted_df: DataFrame = DataFrame(predicted_lines, columns=["prob_false", "prob_true"])
-        paragraph_breaks = predicted_df.loc[predicted_df["prob_true"] >= score_threshold, :].index.tolist()
+        predicted_breaks = predicted_df.loc[
+            predicted_df["prob_true"] >= score_threshold,
+            :,
+        ].index.tolist()
+        paragraph_breaks = _normalise_paragraph_breaks(lines, predicted_breaks)
 
         if len(paragraph_breaks) > 0:
             # Get first break
