@@ -2044,6 +2044,143 @@ class OverlapStructureRegressionTests(unittest.TestCase):
                 self.assertEqual(chunks[1].overlap_char_count, 8)
                 self.assert_integrity(chunks, hierarchy.source, 15)
 
+    @staticmethod
+    def zero_overlap_modes():
+        return (
+            (
+                "characters",
+                {
+                    "max_chars": 15,
+                },
+            ),
+            (
+                "monotonic",
+                {
+                    "max_tokens": 15,
+                    "token_counter": len,
+                    "token_counter_id": "tests.zero-overlap-len.monotonic.v1",
+                    "token_counter_policy": TokenCounterPolicy.MONOTONIC,
+                },
+            ),
+            (
+                "arbitrary",
+                {
+                    "max_tokens": 15,
+                    "token_counter": len,
+                    "token_counter_id": "tests.zero-overlap-len.arbitrary.v1",
+                    "token_counter_policy": TokenCounterPolicy.ARBITRARY,
+                },
+            ),
+        )
+
+    @staticmethod
+    def same_start_heading_hierarchy(*, heading_end=9, length=16):
+        source = "B" * length
+        section = Segment(
+            SegmentKind.SECTION,
+            0,
+            len(source),
+            (
+                Segment(SegmentKind.TEXT, 0, 5),
+                Segment(SegmentKind.TEXT, 5, len(source)),
+            ),
+            attributes=(("heading_end", str(heading_end)),),
+        )
+        return DocumentHierarchy.from_segments(source, (section,))
+
+    def test_zero_overlap_first_unit_preserves_fitting_heading_in_every_planner(
+        self,
+    ):
+        hierarchy = self.same_start_heading_hierarchy()
+        for policy in ContainerPolicy:
+            for name, kwargs in self.zero_overlap_modes():
+                with self.subTest(policy=policy, mode=name):
+                    chunks = chunk_document(
+                        hierarchy,
+                        container_policy=policy,
+                        **kwargs,
+                    )
+                    self.assertEqual(
+                        [
+                            (chunk.start, chunk.new_content_start, chunk.end)
+                            for chunk in chunks
+                        ],
+                        [(0, 0, 9), (9, 9, 16)],
+                    )
+                    self.assertEqual(chunks[0].overlap_provenance.segments, ())
+                    self.assert_integrity(chunks, hierarchy.source, 15)
+
+    def test_zero_overlap_same_start_heading_preserves_negative_controls(self):
+        fitting = self.same_start_heading_hierarchy()
+        oversized = self.same_start_heading_hierarchy(
+            heading_end=16,
+            length=17,
+        )
+        crossing_source = "B" * 25
+        crossing = DocumentHierarchy.from_segments(
+            crossing_source,
+            (
+                Segment(
+                    SegmentKind.SECTION,
+                    0,
+                    25,
+                    (
+                        Segment(SegmentKind.TEXT, 0, 10),
+                        Segment(
+                            SegmentKind.CLAUSE,
+                            10,
+                            20,
+                            attributes=(("heading_end", "20"),),
+                        ),
+                        Segment(SegmentKind.TEXT, 20, 25),
+                    ),
+                    attributes=(("heading_end", "15"),),
+                ),
+            ),
+        )
+
+        for policy in ContainerPolicy:
+            for name, kwargs in self.zero_overlap_modes():
+                with self.subTest(
+                    policy=policy,
+                    mode=name,
+                    case="raw opt-out",
+                ):
+                    chunks = chunk_document(
+                        fitting,
+                        respect_boundaries=False,
+                        container_policy=policy,
+                        **kwargs,
+                    )
+                    self.assertEqual(chunks[0].end, 15)
+                    self.assert_integrity(chunks, fitting.source, 15)
+
+                with self.subTest(
+                    policy=policy,
+                    mode=name,
+                    case="oversized heading",
+                ):
+                    chunks = chunk_document(
+                        oversized,
+                        container_policy=policy,
+                        **kwargs,
+                    )
+                    self.assertEqual(chunks[0].end, 5)
+                    self.assert_integrity(chunks, oversized.source, 15)
+
+                with self.subTest(
+                    policy=policy,
+                    mode=name,
+                    case="later crossing fence",
+                ):
+                    chunks = chunk_document(
+                        crossing,
+                        container_policy=policy,
+                        **kwargs,
+                    )
+                    self.assertEqual(chunks[0].end, 10)
+                    self.assert_integrity(chunks, crossing.source, 15)
+
     def test_same_start_queries_choose_the_longest_fitting_end_logarithmically(self):
         source = "A" * 15 + "B" * 15
         nested = Segment(

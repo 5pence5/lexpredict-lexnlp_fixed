@@ -1032,6 +1032,7 @@ def _arbitrary_end_candidates(
     fresh_start: int,
     limit: int,
     respect_boundaries: bool,
+    same_start_ends: Sequence[int] = (),
 ) -> Iterator[int]:
     if not respect_boundaries:
         for candidate in range(limit, fresh_start, -1):
@@ -1039,30 +1040,62 @@ def _arbitrary_end_candidates(
             yield candidate
         return
 
-    # Registered safe structure first.
+    # Registered safe structure first.  Before an internal child boundary,
+    # offer longer same-start structures so a fitting heading is not split.
+    same_start_position = bisect.bisect_right(same_start_ends, limit)
+    yielded: set[int] = set()
+    unsafe: set[int] = set()
     position = bisect.bisect_right(boundaries, limit)
     while position:
         position -= 1
         candidate = boundaries[position]
         if candidate <= fresh_start:
             break
+        while same_start_position:
+            structure_end = same_start_ends[same_start_position - 1]
+            if structure_end <= candidate:
+                break
+            same_start_position -= 1
+            oracle.step()
+            if (
+                structure_end <= fresh_start
+                or structure_end in yielded
+                or structure_end in unsafe
+            ):
+                continue
+            if headings.is_safe(fresh_start, structure_end):
+                yielded.add(structure_end)
+                yield structure_end
+            else:
+                unsafe.add(structure_end)
         oracle.step()
         if headings.is_safe(fresh_start, candidate):
+            yielded.add(candidate)
             yield candidate
+        else:
+            unsafe.add(candidate)
 
     # Then every other heading-safe endpoint, without allocating an O(n) list.
     for candidate in range(limit, fresh_start, -1):
         oracle.step()
         if (
-            not _registered_boundary(boundaries, candidate)
-            and headings.is_safe(fresh_start, candidate)
+            candidate in yielded
+            or candidate in unsafe
+            or _registered_boundary(boundaries, candidate)
         ):
+            continue
+        if headings.is_safe(fresh_start, candidate):
+            yielded.add(candidate)
             yield candidate
+        else:
+            unsafe.add(candidate)
 
     # An individually oversized heading must still be strictly splittable.
     for candidate in range(limit, fresh_start, -1):
         oracle.step()
-        if not headings.is_safe(fresh_start, candidate):
+        if candidate in yielded:
+            continue
+        if candidate in unsafe or not headings.is_safe(fresh_start, candidate):
             yield candidate
 
 
@@ -1070,6 +1103,7 @@ def _plan_arbitrary_unit(
     oracle: _ArbitraryTokenOracle,
     boundaries: Sequence[int],
     headings: _HeadingIndex,
+    structure_ends_at: Callable[[int], Sequence[int]],
     *,
     unit_start: int,
     unit_end: int,
@@ -1098,6 +1132,7 @@ def _plan_arbitrary_unit(
             fresh_start=fresh_start,
             limit=unit_end,
             respect_boundaries=respect_boundaries,
+            same_start_ends=structure_ends_at(fresh_start),
         ):
             if candidate not in reachable:
                 continue
@@ -1137,6 +1172,7 @@ def _plan_arbitrary_document(
     counter: TokenCounter,
     boundaries: Sequence[int],
     headings: _HeadingIndex,
+    structure_ends_at: Callable[[int], Sequence[int]],
     units: Sequence[tuple[int, int]],
     *,
     budget: int,
@@ -1160,6 +1196,7 @@ def _plan_arbitrary_document(
                 oracle,
                 boundaries,
                 headings,
+                structure_ends_at,
                 unit_start=unit_start,
                 unit_end=unit_end,
                 budget=budget,
@@ -1456,6 +1493,7 @@ def iter_chunks(
             token_counter,
             hierarchy_index.boundaries,
             hierarchy_index.headings,
+            hierarchy_index.structure_ends_at,
             units,
             budget=budget,
             overlap=overlap,
@@ -1498,21 +1536,22 @@ def iter_chunks(
                     hard_end=hard_end,
                     respect_boundaries=respect_boundaries,
                 )
-                if respect_boundaries and context_start != fresh_start:
+                if respect_boundaries:
                     fitting_end = hierarchy_index.fitting_structure_end(
                         fresh_start,
                         min(unit_end, fresh_start + budget),
                     )
                     if fitting_end is not None and end < fitting_end:
-                        context_start = fresh_start
-                        hard_end = min(unit_end, fresh_start + budget)
-                        end = _boundary_end(
-                            hierarchy_index.boundaries,
-                            hierarchy_index.headings,
-                            fresh_start=fresh_start,
-                            hard_end=hard_end,
-                            respect_boundaries=respect_boundaries,
-                        )
+                        if context_start != fresh_start:
+                            context_start = fresh_start
+                            hard_end = min(unit_end, fresh_start + budget)
+                            end = _boundary_end(
+                                hierarchy_index.boundaries,
+                                hierarchy_index.headings,
+                                fresh_start=fresh_start,
+                                hard_end=hard_end,
+                                respect_boundaries=respect_boundaries,
+                            )
                         if (
                             end < fitting_end
                             and hierarchy_index.headings.is_safe(
@@ -1558,10 +1597,7 @@ def iter_chunks(
                     budget=budget,
                     respect_boundaries=respect_boundaries,
                 )
-                if (
-                    respect_boundaries
-                    and context_start != fresh_start
-                ):
+                if respect_boundaries:
                     fitting = _fitting_token_structure_end(
                         hierarchy_index,
                         source,
@@ -1574,18 +1610,19 @@ def iter_chunks(
                         planned is None or planned[0] < fitting[0]
                     ):
                         fitting_end, fitting_count = fitting
-                        context_start = fresh_start
-                        planned = _token_end(
-                            source,
-                            token_counter,
-                            hierarchy_index.boundaries,
-                            hierarchy_index.headings,
-                            context_start=context_start,
-                            fresh_start=fresh_start,
-                            limit=unit_end,
-                            budget=budget,
-                            respect_boundaries=respect_boundaries,
-                        )
+                        if context_start != fresh_start:
+                            context_start = fresh_start
+                            planned = _token_end(
+                                source,
+                                token_counter,
+                                hierarchy_index.boundaries,
+                                hierarchy_index.headings,
+                                context_start=context_start,
+                                fresh_start=fresh_start,
+                                limit=unit_end,
+                                budget=budget,
+                                respect_boundaries=respect_boundaries,
+                            )
                         if (
                             planned is not None
                             and planned[0] < fitting_end
