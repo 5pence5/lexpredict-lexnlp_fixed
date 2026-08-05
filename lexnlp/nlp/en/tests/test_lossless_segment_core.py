@@ -1196,11 +1196,11 @@ class FinalCoreCorrectionTests(unittest.TestCase):
 
     def test_arbitrary_counter_checks_every_feasible_overlap_context(self):
         def counter(text):
-            return 1 if text in {"ab", "b", "bcd"} else 2
+            return 1 if text in {"ab", "b", "bcd"} else 3
 
         chunks = chunk_document(
             "abcd",
-            max_tokens=1,
+            max_tokens=2,
             overlap_tokens=1,
             token_counter=counter,
             token_counter_id="tests.overlap-context.v1",
@@ -1266,11 +1266,11 @@ class FinalCoreCorrectionTests(unittest.TestCase):
         )
 
         def counter(text):
-            return 1 if text in {"ab", "abc", "cde", "de", "e"} else 2
+            return 1 if text in {"ab", "abc", "cde", "de", "e"} else 3
 
         chunks = chunk_document(
             hierarchy,
-            max_tokens=1,
+            max_tokens=2,
             overlap_tokens=1,
             token_counter=counter,
             token_counter_id="tests.coverage-before-overlap.v1",
