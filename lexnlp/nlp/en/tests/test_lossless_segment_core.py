@@ -26,9 +26,12 @@ from lexnlp.nlp.en.segments.chunks import (
     ChunkProvenance,
     ContainerPolicy,
     SegmentReference,
+    TokenCounterPolicy,
+    TokenSearchLimitExceeded,
     chunk_document,
     compute_chunk_metadata_sha256,
     compute_provenance_sha256,
+    iter_chunks,
     reconstruct_chunks,
 )
 
@@ -477,6 +480,7 @@ class LosslessChunkTests(unittest.TestCase):
                 max_chars=2,
                 token_counter=len,
                 token_counter_id="tests.len.v1",
+                token_counter_policy=TokenCounterPolicy.MONOTONIC,
                 **self.options(),
             )
         with self.assertRaisesRegex(ValueError, "token_counter_id"):
@@ -486,11 +490,20 @@ class LosslessChunkTests(unittest.TestCase):
                 token_counter=len,
                 **self.options(),
             )
+        with self.assertRaisesRegex(ValueError, "token_counter_policy"):
+            chunk_document(
+                "abcdef",
+                max_tokens=2,
+                token_counter=len,
+                token_counter_id="tests.len.v1",
+                **self.options(),
+            )
         chunks = chunk_document(
             "abcdefghij",
             max_tokens=4,
             token_counter=len,
             token_counter_id="tests.len.v1",
+            token_counter_policy=TokenCounterPolicy.MONOTONIC,
             respect_boundaries=False,
             **self.options(),
         )
@@ -507,6 +520,10 @@ class LosslessChunkTests(unittest.TestCase):
             max_tokens=2,
             token_counter=non_monotonic,
             token_counter_id="tests.non-monotonic.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=2_000,
+            token_search_max_input_bytes=20_000,
+            token_search_max_steps=10_000,
             respect_boundaries=False,
             **self.options(),
         )
@@ -530,6 +547,7 @@ class LosslessChunkTests(unittest.TestCase):
             max_tokens=100,
             token_counter=measured_len,
             token_counter_id="tests.measured-len.v1",
+            token_counter_policy=TokenCounterPolicy.MONOTONIC,
             respect_boundaries=False,
             **self.options(),
         )
@@ -1096,6 +1114,317 @@ class FinalCoreCorrectionTests(unittest.TestCase):
         self.assertGreater(by_label["(i)"].level, by_label["(b)"].level)
         self.assertGreater(by_label["(ii)"].level, by_label["(b)"].level)
 
+    def test_boundary_opt_out_uses_raw_endpoints_in_both_budget_modes(self):
+        source = "xxHEADzz"
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (
+                Segment(
+                    SegmentKind.SECTION,
+                    0,
+                    len(source),
+                    attributes=(("heading_end", "6"),),
+                ),
+            ),
+        )
+        characters = chunk_document(
+            hierarchy,
+            max_chars=4,
+            respect_boundaries=False,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+        )
+        tokens = chunk_document(
+            hierarchy,
+            max_tokens=4,
+            token_counter=len,
+            token_counter_id="tests.len.v1",
+            token_counter_policy=TokenCounterPolicy.MONOTONIC,
+            respect_boundaries=False,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+        )
+        expected = [(0, 4), (4, 8)]
+        self.assertEqual(
+            [(chunk.start, chunk.end) for chunk in characters],
+            expected,
+        )
+        self.assertEqual(
+            [(chunk.start, chunk.end) for chunk in tokens],
+            expected,
+        )
+
+    def test_arbitrary_counter_finds_a_later_feasible_endpoint(self):
+        def counter(text):
+            return 1 if text in {"a", "abc"} else 2
+
+        chunks = chunk_document(
+            "abc",
+            max_tokens=1,
+            token_counter=counter,
+            token_counter_id="tests.later-feasible.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=50,
+            token_search_max_input_bytes=100,
+            token_search_max_steps=100,
+            respect_boundaries=False,
+            **self.options(),
+        )
+        self.assertEqual(
+            [(chunk.start, chunk.end, chunk.unit_count) for chunk in chunks],
+            [(0, 3, 1)],
+        )
+
+    def test_arbitrary_counter_backtracks_around_a_greedy_dead_end(self):
+        def counter(text):
+            return 1 if text in {"ab", "abc", "cd"} else 2
+
+        chunks = chunk_document(
+            "abcd",
+            max_tokens=1,
+            token_counter=counter,
+            token_counter_id="tests.global-path.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=100,
+            token_search_max_input_bytes=500,
+            token_search_max_steps=500,
+            respect_boundaries=False,
+            **self.options(),
+        )
+        self.assertEqual(
+            [(chunk.start, chunk.end) for chunk in chunks],
+            [(0, 2), (2, 4)],
+        )
+
+    def test_arbitrary_counter_checks_every_feasible_overlap_context(self):
+        def counter(text):
+            return 1 if text in {"ab", "b", "bcd"} else 2
+
+        chunks = chunk_document(
+            "abcd",
+            max_tokens=1,
+            overlap_tokens=1,
+            token_counter=counter,
+            token_counter_id="tests.overlap-context.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=200,
+            token_search_max_input_bytes=1_000,
+            token_search_max_steps=1_000,
+            respect_boundaries=False,
+            **self.options(),
+        )
+        self.assertEqual(
+            [
+                (chunk.start, chunk.new_content_start, chunk.end)
+                for chunk in chunks
+            ],
+            [(0, 0, 2), (1, 2, 4)],
+        )
+
+    def test_arbitrary_search_keeps_registered_heading_interior_endpoints(self):
+        source = "abc"
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (
+                Segment(
+                    SegmentKind.SECTION,
+                    0,
+                    len(source),
+                    children=(
+                        Segment(SegmentKind.TEXT, 0, 1),
+                        Segment(SegmentKind.TEXT, 1, len(source)),
+                    ),
+                    attributes=(("heading_end", "3"),),
+                ),
+            ),
+        )
+
+        def counter(text):
+            return 1 if text in {"a", "bc"} else 2
+
+        chunks = chunk_document(
+            hierarchy,
+            max_tokens=1,
+            token_counter=counter,
+            token_counter_id="tests.registered-heading-interior.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=100,
+            token_search_max_input_bytes=500,
+            token_search_max_steps=500,
+        )
+        self.assertEqual(
+            [(chunk.start, chunk.end) for chunk in chunks],
+            [(0, 1), (1, 3)],
+        )
+
+    def test_arbitrary_counter_prioritises_coverage_before_overlap(self):
+        source = "abcde"
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (
+                Segment(SegmentKind.TEXT, 0, 2),
+                Segment(SegmentKind.TEXT, 2, len(source)),
+            ),
+        )
+
+        def counter(text):
+            return 1 if text in {"ab", "abc", "cde", "de", "e"} else 2
+
+        chunks = chunk_document(
+            hierarchy,
+            max_tokens=1,
+            overlap_tokens=1,
+            token_counter=counter,
+            token_counter_id="tests.coverage-before-overlap.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=500,
+            token_search_max_input_bytes=5_000,
+            token_search_max_steps=5_000,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+        )
+        self.assertEqual(
+            [
+                (chunk.start, chunk.new_content_start, chunk.end)
+                for chunk in chunks
+            ],
+            [(0, 0, 2), (2, 2, 5)],
+        )
+
+    def test_arbitrary_counter_prefers_heading_safe_endpoints(self):
+        source = "xxHEADzz"
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (
+                Segment(SegmentKind.TEXT, 0, 2),
+                Segment(
+                    SegmentKind.SECTION,
+                    2,
+                    len(source),
+                    attributes=(("heading_end", "6"),),
+                ),
+            ),
+        )
+
+        def counter(text):
+            return 1 if len(text) == 1 or text == "xxHEA" else 2
+
+        chunks = chunk_document(
+            hierarchy,
+            max_tokens=1,
+            token_counter=counter,
+            token_counter_id="tests.heading-order.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=500,
+            token_search_max_input_bytes=5_000,
+            token_search_max_steps=5_000,
+            container_policy=ContainerPolicy.PACK_SIBLINGS,
+        )
+        self.assertEqual(chunks[0].end, 1)
+        self.assertFalse(2 < chunks[0].end < 6)
+
+    def test_arbitrary_search_envelopes_fail_before_partial_output(self):
+        cases = (
+            ("calls", "ab", 1, 100, 100, 2, 1),
+            ("input_bytes", "é", 10, 1, 100, 2, 1),
+            ("steps", "ab", 10, 100, 1, 2, 1),
+        )
+        for (
+            envelope,
+            source,
+            max_calls,
+            max_input_bytes,
+            max_steps,
+            observed,
+            maximum,
+        ) in cases:
+            calls = 0
+
+            def counter(_text):
+                nonlocal calls
+                calls += 1
+                return 2
+
+            stream = iter_chunks(
+                source,
+                max_tokens=1,
+                token_counter=counter,
+                token_counter_id=f"tests.limit-{envelope}.v1",
+                token_counter_policy=TokenCounterPolicy.ARBITRARY,
+                token_search_max_calls=max_calls,
+                token_search_max_input_bytes=max_input_bytes,
+                token_search_max_steps=max_steps,
+                respect_boundaries=False,
+                **self.options(),
+            )
+            with self.subTest(envelope=envelope):
+                with self.assertRaises(TokenSearchLimitExceeded) as caught:
+                    next(stream)
+                self.assertEqual(caught.exception.envelope, envelope)
+                self.assertEqual(caught.exception.observed, observed)
+                self.assertEqual(caught.exception.maximum, maximum)
+                self.assertLessEqual(calls, max_calls)
+
+    def test_large_source_tiny_byte_envelope_calls_no_counter(self):
+        source = "a" * 1_000_000 + "é"
+        hierarchy = DocumentHierarchy.from_segments(
+            source,
+            (Segment(SegmentKind.TEXT, 0, len(source)),),
+        )
+        calls = 0
+
+        def counter(_text):
+            nonlocal calls
+            calls += 1
+            return 1
+
+        stream = iter_chunks(
+            hierarchy,
+            max_tokens=1,
+            token_counter=counter,
+            token_counter_id="tests.large-byte-preflight.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=10,
+            token_search_max_input_bytes=1,
+            token_search_max_steps=10,
+            respect_boundaries=False,
+        )
+        with self.assertRaises(TokenSearchLimitExceeded) as caught:
+            next(stream)
+        self.assertEqual(caught.exception.envelope, "input_bytes")
+        self.assertEqual(calls, 0)
+
+    def test_counter_policy_and_envelopes_change_authenticated_identity(self):
+        monotonic = chunk_document(
+            "abcd",
+            max_tokens=4,
+            token_counter=len,
+            token_counter_id="tests.len.v1",
+            token_counter_policy=TokenCounterPolicy.MONOTONIC,
+            respect_boundaries=False,
+            **self.options(),
+        )[0]
+        arbitrary = chunk_document(
+            "abcd",
+            max_tokens=4,
+            token_counter=len,
+            token_counter_id="tests.len.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=100,
+            token_search_max_input_bytes=1_000,
+            token_search_max_steps=1_000,
+            respect_boundaries=False,
+            **self.options(),
+        )[0]
+        self.assertEqual(monotonic.text, arbitrary.text)
+        self.assertNotEqual(monotonic.manifest.manifest_id, arbitrary.manifest.manifest_id)
+        self.assertNotEqual(monotonic.chunk_id, arbitrary.chunk_id)
+        self.assertEqual(monotonic.manifest.schema_version, 2)
+        self.assertEqual(
+            arbitrary.manifest.token_counter_policy,
+            TokenCounterPolicy.ARBITRARY,
+        )
+        self.assertEqual(arbitrary.manifest.token_search_max_calls, 100)
+        self.assertEqual(arbitrary.manifest.token_search_max_input_bytes, 1_000)
+        self.assertEqual(arbitrary.manifest.token_search_max_steps, 1_000)
+
     def test_nonmonotonic_token_counter_keeps_known_feasible_hard_endpoint(self):
         source = "aHxyz"
         hierarchy = DocumentHierarchy.from_segments(
@@ -1119,6 +1448,10 @@ class FinalCoreCorrectionTests(unittest.TestCase):
             max_tokens=1,
             token_counter=counter,
             token_counter_id="tests.nonmonotonic.v1",
+            token_counter_policy=TokenCounterPolicy.ARBITRARY,
+            token_search_max_calls=500,
+            token_search_max_input_bytes=5_000,
+            token_search_max_steps=5_000,
             respect_boundaries=False,
             container_policy=ContainerPolicy.PACK_SIBLINGS,
         )

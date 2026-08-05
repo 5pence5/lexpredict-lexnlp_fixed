@@ -36,6 +36,7 @@ def test_token_operational_benchmark_exercises_explicit_counter_identity():
     assert report["configuration"]["max_tokens"] == 100
     assert report["configuration"]["overlap_tokens"] == 10
     assert report["configuration"]["token_counter_id"] == "lexnlp-count-tokens-v1"
+    assert report["configuration"]["token_counter_policy"] == "monotonic"
     assert report["measurements"]["deterministic"]
 
 

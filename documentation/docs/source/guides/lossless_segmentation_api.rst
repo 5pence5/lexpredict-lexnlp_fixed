@@ -148,8 +148,10 @@ Chunking API
 ------------
 
 `chunk_document` accepts source text or an existing hierarchy.
-`iter_chunks` emits the same immutable chunks lazily, although v1 still
-materialises the source hierarchy.
+`iter_chunks` emits the same immutable chunks lazily in character and
+monotonic-token modes, although the source hierarchy is materialised.
+Arbitrary-counter mode completes its bounded whole-document search before the
+first yield, so a limit or no-partition failure never follows partial output.
 
 Character mode
 ~~~~~~~~~~~~~~
@@ -175,7 +177,10 @@ an empty iterable therefore carries no manifest evidence and
 Token mode
 ~~~~~~~~~~
 
-Token mode requires the downstream counter and a stable counter identity::
+Token mode requires a deterministic downstream counter, a stable counter
+identity and an explicit capability policy::
+
+    from lexnlp.nlp.en.segments import TokenCounterPolicy
 
     def embedding_token_count(value: str) -> int:
         return len(pinned_tokeniser.encode(value, add_special_tokens=False))
@@ -185,17 +190,38 @@ Token mode requires the downstream counter and a stable counter identity::
         max_tokens=480,
         token_counter=embedding_token_count,
         token_counter_id="embedding-tokeniser@revision/no-special-tokens",
+        token_counter_policy=TokenCounterPolicy.ARBITRARY,
+        token_search_max_calls=50_000,
+        token_search_max_input_bytes=32_000_000,
+        token_search_max_steps=500_000,
         overlap_tokens=32,
     )
 
 The dependency-free `count_tokens` helper is available only when a caller
 deliberately selects its lexical word/punctuation units.  It is never an
-implicit model-token fallback.  Character mode rejects a token counter or ID.
+implicit model-token fallback.  Character mode rejects all token-counter
+options.
 
-Every accepted slice is independently budget-verified.  A non-monotonic
-black-box counter can make packing conservative but cannot make a returned
-chunk exceed its reported budget.  If every non-empty prefix is over budget,
-packing raises.
+`TokenCounterPolicy.MONOTONIC` asserts two-sided substring-inclusion
+monotonicity: extending a fixed context to the right cannot reduce endpoint
+counts, and extending a fixed fresh boundary to the left cannot reduce overlap
+counts.  LexNLP then uses bounded exponential/binary searches.  Supplying a
+counter which violates that declaration is caller error.
+
+`TokenCounterPolicy.ARBITRARY` supports a deterministic counter without that
+ordering property.  It searches all character endpoints, feasible overlap
+contexts and suffix partitions needed for a completeness proof.  Advancing
+coverage and safe structure are preferred first; overlap is maximised for that
+chosen endpoint.  Exact calls, UTF-8 input bytes and candidate/search steps are
+bounded by `token_search_max_calls`, `token_search_max_input_bytes` and
+`token_search_max_steps`.  Finite defaults are available, but the effective
+values are always recorded in the manifest.
+
+If an arbitrary search completes within its envelope, it either returns a
+strict-cap partition or proves none exists.  If an envelope is insufficient,
+`TokenSearchLimitExceeded` identifies the envelope and attempted/maximum
+values before an over-limit call and before any chunk is yielded.  Increasing
+an envelope is an explicit new configuration with a different manifest ID.
 
 Container and overlap policy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -209,14 +235,16 @@ splits to preserve the strict budget.
 Overlap is inside the budget and is a maximum.  It may be reduced or dropped
 when retaining it would split a container which otherwise fits.  Container
 policy is intentionally irrelevant when `respect_boundaries=False` disables
-structural alignment.
+all structural and heading alignment and uses raw hard endpoints.
 
 Manifests, provenance and identity
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 `ChunkingManifest` records the source digest/document namespace, hierarchy
 manifest, unit/budget/overlap, boundary/container policy, schema/serialiser
-versions and token-counter ID.  Canonical JSON produces `manifest_id`.
+versions, token-counter ID, capability policy and effective arbitrary-search
+envelopes.  Chunking schema v2 intentionally changes authenticated identities
+when any of that evidence changes.  Canonical JSON produces `manifest_id`.
 
 Each `DocumentChunk` records:
 
@@ -313,7 +341,7 @@ API reference
    :members: SaTSentenceSegmenter, legacy_sentence_segmenter, parts_to_spans
 
 .. automodule:: lexnlp.nlp.en.segments.chunks
-   :members: ContainerPolicy, ChunkingManifest, SegmentReference, ChunkProvenance, DocumentChunk, count_tokens, compute_provenance_sha256, compute_chunk_metadata_sha256, iter_chunks, chunk_document, reconstruct_chunks
+   :members: ContainerPolicy, TokenCounterPolicy, TokenSearchLimitExceeded, ChunkingManifest, SegmentReference, ChunkProvenance, DocumentChunk, count_tokens, compute_provenance_sha256, compute_chunk_metadata_sha256, iter_chunks, chunk_document, reconstruct_chunks
 
 .. automodule:: lexnlp.nlp.en.segments.payloads
    :members: ContextFragment, EmbeddingPayload, PayloadBudgetExceeded, render_embedding_payload

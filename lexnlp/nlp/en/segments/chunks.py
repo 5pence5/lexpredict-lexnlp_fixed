@@ -23,7 +23,10 @@ from lexnlp.nlp.en.segments.hierarchy import (
 )
 
 DEFAULT_MAX_CHARS = 4000
-CHUNKING_SCHEMA_VERSION = 1
+DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_CALLS = 10_000
+DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_INPUT_BYTES = 16_000_000
+DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS = 100_000
+CHUNKING_SCHEMA_VERSION = 2
 CHUNKING_SERIALIZER_VERSION = 1
 TokenCounter: TypeAlias = Callable[[str], int]
 
@@ -31,6 +34,26 @@ TokenCounter: TypeAlias = Callable[[str], int]
 class ContainerPolicy(str, Enum):
     PRESERVE = "preserve"
     PACK_SIBLINGS = "pack_siblings"
+
+
+class TokenCounterPolicy(str, Enum):
+    """Declared capabilities that select the token endpoint search algorithm."""
+
+    MONOTONIC = "monotonic"
+    ARBITRARY = "arbitrary"
+
+
+class TokenSearchLimitExceeded(RuntimeError):
+    """An arbitrary-counter search exhausted an authenticated work envelope."""
+
+    def __init__(self, envelope: str, observed: int, maximum: int) -> None:
+        self.envelope = envelope
+        self.observed = observed
+        self.maximum = maximum
+        super().__init__(
+            f"arbitrary token search {envelope} envelope exceeded: "
+            f"{observed} > {maximum}"
+        )
 
 
 def _integer(value: object, name: str, *, minimum: int | None = None) -> int:
@@ -105,6 +128,10 @@ class ChunkingManifest:
     container_policy: ContainerPolicy
     hierarchy_manifest: HierarchyManifest
     token_counter_id: str | None = None
+    token_counter_policy: TokenCounterPolicy | None = None
+    token_search_max_calls: int | None = None
+    token_search_max_input_bytes: int | None = None
+    token_search_max_steps: int | None = None
     schema_version: int = CHUNKING_SCHEMA_VERSION
     serializer_version: int = CHUNKING_SERIALIZER_VERSION
 
@@ -137,14 +164,44 @@ class ChunkingManifest:
             raise ValueError("hierarchy_manifest must identify the realised tree")
         _integer(self.schema_version, "schema_version", minimum=1)
         _integer(self.serializer_version, "serializer_version", minimum=1)
+        search_limits = (
+            self.token_search_max_calls,
+            self.token_search_max_input_bytes,
+            self.token_search_max_steps,
+        )
         if self.unit_kind == "tokens":
             if (
                 not isinstance(self.token_counter_id, str)
                 or not self.token_counter_id.strip()
             ):
                 raise ValueError("token mode requires a non-empty token_counter_id")
-        elif self.token_counter_id is not None:
-            raise ValueError("token_counter_id is only valid in token mode")
+            if self.token_counter_policy is None:
+                raise ValueError(
+                    "token mode requires an explicit token_counter_policy"
+                )
+            policy = _enum(
+                self.token_counter_policy,
+                TokenCounterPolicy,
+                "token_counter_policy",
+            )
+            object.__setattr__(self, "token_counter_policy", policy)
+            if policy is TokenCounterPolicy.ARBITRARY:
+                for name in (
+                    "token_search_max_calls",
+                    "token_search_max_input_bytes",
+                    "token_search_max_steps",
+                ):
+                    _integer(getattr(self, name), name, minimum=1)
+            elif any(value is not None for value in search_limits):
+                raise ValueError(
+                    "token search envelopes are only valid for arbitrary counters"
+                )
+        elif (
+            self.token_counter_id is not None
+            or self.token_counter_policy is not None
+            or any(value is not None for value in search_limits)
+        ):
+            raise ValueError("token counter options are only valid in token mode")
 
     @property
     def source_id(self) -> str:
@@ -173,6 +230,14 @@ class ChunkingManifest:
             "serializer_version": self.serializer_version,
             "source_sha256": self.source_sha256,
             "token_counter_id": self.token_counter_id,
+            "token_counter_policy": (
+                None
+                if self.token_counter_policy is None
+                else self.token_counter_policy.value
+            ),
+            "token_search_max_calls": self.token_search_max_calls,
+            "token_search_max_input_bytes": self.token_search_max_input_bytes,
+            "token_search_max_steps": self.token_search_max_steps,
             "unit_kind": self.unit_kind,
         }
         return json.dumps(
@@ -610,9 +675,9 @@ def _boundary_end(
     hard_end: int,
     respect_boundaries: bool,
 ) -> int:
-    hard_end = headings.safe_hard_end(fresh_start, hard_end)
     if not respect_boundaries:
         return hard_end
+    hard_end = headings.safe_hard_end(fresh_start, hard_end)
     position = bisect.bisect_right(boundaries, hard_end)
     while position:
         position -= 1
@@ -625,7 +690,7 @@ def _boundary_end(
 
 
 class _TokenCountCache:
-    """A per-planning-step bounded cache for black-box token counters."""
+    """A per-planning-step bounded cache for monotonic token counters."""
 
     def __init__(
         self,
@@ -698,19 +763,10 @@ def _raw_token_end(
         return None
 
     first = fresh_start + 1
-    if cache.count(context_start, first) <= budget:
-        last_feasible = first
-    else:
-        last_feasible = 0
-        # A black-box counter is not required to be monotonic.  Search for a
-        # feasible advancing slice before declaring that the budget is
-        # impossible.
-        for candidate in range(first + 1, limit + 1):
-            if cache.count(context_start, candidate) <= budget:
-                last_feasible = candidate
-                break
-        if not last_feasible:
-            return None
+    if cache.count(context_start, first) > budget:
+        # MONOTONIC promises that extending this slice cannot reduce its count.
+        return None
+    last_feasible = first
 
     distance = max(1, last_feasible - fresh_start)
     first_over: int | None = None
@@ -757,11 +813,12 @@ def _token_end(
     raw = _raw_token_end(cache, context_start, fresh_start, limit, budget)
     if raw is None:
         return None
+    if not respect_boundaries:
+        return raw, cache.count(context_start, raw)
 
-    # A heading boundary is advisory when using a caller-supplied token counter.
-    # An arbitrary counter need not be monotonic: shortening a feasible span can
-    # make it over budget.  Retain the known-feasible raw endpoint unless the
-    # adjusted heading-safe endpoint is independently feasible.
+    # Heading alignment is advisory even for a declared monotonic counter.
+    # Retain the known-feasible raw endpoint unless the adjusted endpoint is
+    # independently feasible.
     adjusted = headings.safe_hard_end(fresh_start, raw)
     boundary_limit = raw
     if (
@@ -770,27 +827,273 @@ def _token_end(
     ):
         boundary_limit = adjusted
 
-    candidate = boundary_limit
-    if respect_boundaries:
-        position = bisect.bisect_right(boundaries, boundary_limit)
-        candidate = 0
-        while position:
-            position -= 1
-            boundary = boundaries[position]
-            if boundary <= fresh_start:
-                break
-            if (
-                headings.is_safe(boundary)
-                and cache.count(context_start, boundary) <= budget
-            ):
-                candidate = boundary
-                break
-        if candidate == 0:
-            candidate = boundary_limit
+    position = bisect.bisect_right(boundaries, boundary_limit)
+    candidate = 0
+    while position:
+        position -= 1
+        boundary = boundaries[position]
+        if boundary <= fresh_start:
+            break
+        if (
+            headings.is_safe(boundary)
+            and cache.count(context_start, boundary) <= budget
+        ):
+            candidate = boundary
+            break
+    if candidate == 0:
+        candidate = boundary_limit
     count = cache.count(context_start, candidate)
     if count > budget or candidate <= fresh_start:
         return None
     return candidate, count
+
+
+@dataclass(frozen=True, slots=True)
+class _PlannedTokenChunk:
+    context_start: int
+    fresh_start: int
+    end: int
+    unit_count: int
+
+
+class _ArbitraryTokenOracle:
+    """Exact counter cache with document-wide calls, bytes, and steps ledgers."""
+
+    def __init__(
+        self,
+        source: str,
+        counter: TokenCounter,
+        *,
+        max_calls: int,
+        max_input_bytes: int,
+        max_steps: int,
+    ) -> None:
+        self.source = source
+        self.counter = counter
+        self.max_calls = max_calls
+        self.max_input_bytes = max_input_bytes
+        self.max_steps = max_steps
+        self.calls = 0
+        self.input_bytes = 0
+        self.steps = 0
+        self.values: dict[tuple[int, int], int] = {}
+
+    @staticmethod
+    def _limit(envelope: str, observed: int, maximum: int) -> None:
+        if observed > maximum:
+            raise TokenSearchLimitExceeded(envelope, observed, maximum)
+
+    def step(self) -> None:
+        attempted = self.steps + 1
+        self._limit("steps", attempted, self.max_steps)
+        self.steps = attempted
+
+    def count(self, start: int, end: int) -> int:
+        key = (start, end)
+        cached = self.values.get(key)
+        if cached is not None:
+            return cached
+
+        attempted_calls = self.calls + 1
+        self._limit("calls", attempted_calls, self.max_calls)
+
+        # Measure by index before allocating the slice.  The scan stops as soon
+        # as the remaining byte envelope is exceeded, so rejected and accepted
+        # preparation work is itself bounded without an O(n) prefix object graph.
+        remaining_bytes = self.max_input_bytes - self.input_bytes
+        slice_bytes = 0
+        for index in range(start, end):
+            slice_bytes += len(
+                self.source[index].encode("utf-8", "surrogatepass")
+            )
+            if slice_bytes > remaining_bytes:
+                raise TokenSearchLimitExceeded(
+                    "input_bytes",
+                    self.input_bytes + slice_bytes,
+                    self.max_input_bytes,
+                )
+        attempted_bytes = self.input_bytes + slice_bytes
+
+        # Account immediately before the actual call.  A counter exception still
+        # consumed the declared operation.
+        self.calls = attempted_calls
+        self.input_bytes = attempted_bytes
+        value = self.counter(self.source[start:end])
+        _integer(value, "token counter result", minimum=0)
+        self.values[key] = value
+        return value
+
+
+def _arbitrary_contexts(
+    oracle: _ArbitraryTokenOracle,
+    *,
+    unit_start: int,
+    fresh_start: int,
+    overlap: int,
+) -> tuple[int, ...]:
+    if fresh_start == unit_start or overlap == 0:
+        return (fresh_start,)
+
+    # Prefer the greatest source overlap, but retain every exact-feasible
+    # context so a non-monotonic full-slice count cannot strand the partition.
+    contexts: list[int] = []
+    for context_start in range(unit_start, fresh_start):
+        oracle.step()
+        if oracle.count(context_start, fresh_start) <= overlap:
+            contexts.append(context_start)
+    contexts.append(fresh_start)
+    return tuple(contexts)
+
+
+def _registered_boundary(boundaries: Sequence[int], candidate: int) -> bool:
+    position = bisect.bisect_left(boundaries, candidate)
+    return position < len(boundaries) and boundaries[position] == candidate
+
+
+def _arbitrary_end_candidates(
+    oracle: _ArbitraryTokenOracle,
+    boundaries: Sequence[int],
+    headings: _HeadingIndex,
+    *,
+    fresh_start: int,
+    limit: int,
+    respect_boundaries: bool,
+) -> Iterator[int]:
+    if not respect_boundaries:
+        for candidate in range(limit, fresh_start, -1):
+            oracle.step()
+            yield candidate
+        return
+
+    # Registered safe structure first.
+    position = bisect.bisect_right(boundaries, limit)
+    while position:
+        position -= 1
+        candidate = boundaries[position]
+        if candidate <= fresh_start:
+            break
+        oracle.step()
+        if headings.is_safe(candidate):
+            yield candidate
+
+    # Then every other heading-safe endpoint, without allocating an O(n) list.
+    for candidate in range(limit, fresh_start, -1):
+        oracle.step()
+        if (
+            not _registered_boundary(boundaries, candidate)
+            and headings.is_safe(candidate)
+        ):
+            yield candidate
+
+    # An individually oversized heading must still be strictly splittable.
+    for candidate in range(limit, fresh_start, -1):
+        oracle.step()
+        if not headings.is_safe(candidate):
+            yield candidate
+
+
+def _plan_arbitrary_unit(
+    oracle: _ArbitraryTokenOracle,
+    boundaries: Sequence[int],
+    headings: _HeadingIndex,
+    *,
+    unit_start: int,
+    unit_end: int,
+    budget: int,
+    overlap: int,
+    respect_boundaries: bool,
+) -> tuple[_PlannedTokenChunk, ...]:
+    # Reachability, rather than a greedy local endpoint, proves that each chosen
+    # edge has a complete suffix partition.
+    reachable = {unit_end}
+    choices: dict[int, _PlannedTokenChunk] = {}
+    for fresh_start in range(unit_end - 1, unit_start - 1, -1):
+        selected: _PlannedTokenChunk | None = None
+        contexts = _arbitrary_contexts(
+            oracle,
+            unit_start=unit_start,
+            fresh_start=fresh_start,
+            overlap=overlap,
+        )
+        # Advancing coverage/structure is primary.  For that endpoint, maximise
+        # overlap by checking exact-feasible contexts from earliest to zero.
+        for candidate in _arbitrary_end_candidates(
+            oracle,
+            boundaries,
+            headings,
+            fresh_start=fresh_start,
+            limit=unit_end,
+            respect_boundaries=respect_boundaries,
+        ):
+            if candidate not in reachable:
+                continue
+            for context_start in contexts:
+                oracle.step()
+                count = oracle.count(context_start, candidate)
+                if count <= budget:
+                    selected = _PlannedTokenChunk(
+                        context_start,
+                        fresh_start,
+                        candidate,
+                        count,
+                    )
+                    break
+            if selected is not None:
+                break
+        if selected is not None:
+            reachable.add(fresh_start)
+            choices[fresh_start] = selected
+
+    if unit_start not in reachable:
+        raise ValueError(
+            "token_counter cannot fit advancing source content within max_tokens"
+        )
+
+    result: list[_PlannedTokenChunk] = []
+    fresh_start = unit_start
+    while fresh_start < unit_end:
+        planned = choices[fresh_start]
+        result.append(planned)
+        fresh_start = planned.end
+    return tuple(result)
+
+
+def _plan_arbitrary_document(
+    source: str,
+    counter: TokenCounter,
+    boundaries: Sequence[int],
+    headings: _HeadingIndex,
+    units: Sequence[tuple[int, int]],
+    *,
+    budget: int,
+    overlap: int,
+    respect_boundaries: bool,
+    max_calls: int,
+    max_input_bytes: int,
+    max_steps: int,
+) -> tuple[_PlannedTokenChunk, ...]:
+    oracle = _ArbitraryTokenOracle(
+        source,
+        counter,
+        max_calls=max_calls,
+        max_input_bytes=max_input_bytes,
+        max_steps=max_steps,
+    )
+    result: list[_PlannedTokenChunk] = []
+    for unit_start, unit_end in units:
+        result.extend(
+            _plan_arbitrary_unit(
+                oracle,
+                boundaries,
+                headings,
+                unit_start=unit_start,
+                unit_end=unit_end,
+                budget=budget,
+                overlap=overlap,
+                respect_boundaries=respect_boundaries,
+            )
+        )
+    return tuple(result)
 
 
 def _provenance_for(
@@ -923,6 +1226,10 @@ def iter_chunks(
     max_tokens: int | None = None,
     token_counter: TokenCounter | None = None,
     token_counter_id: str | None = None,
+    token_counter_policy: TokenCounterPolicy | str | None = None,
+    token_search_max_calls: int | None = None,
+    token_search_max_input_bytes: int | None = None,
+    token_search_max_steps: int | None = None,
     overlap_chars: int = 0,
     overlap_tokens: int = 0,
     respect_boundaries: bool = True,
@@ -949,22 +1256,79 @@ def iter_chunks(
             raise ValueError("max_tokens requires an explicit token_counter")
         if not isinstance(token_counter_id, str) or not token_counter_id.strip():
             raise ValueError("max_tokens requires a non-empty token_counter_id")
+        if token_counter_policy is None:
+            raise ValueError(
+                "max_tokens requires an explicit token_counter_policy"
+            )
+        counter_policy = _enum(
+            token_counter_policy,
+            TokenCounterPolicy,
+            "token_counter_policy",
+        )
         if max_chars is not None or overlap_chars:
             raise ValueError("character budget options cannot be used in token mode")
         overlap = _integer(overlap_tokens, "overlap_tokens", minimum=0)
         unit_kind = "tokens"
+        if counter_policy is TokenCounterPolicy.ARBITRARY:
+            search_max_calls = _integer(
+                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_CALLS
+                if token_search_max_calls is None
+                else token_search_max_calls,
+                "token_search_max_calls",
+                minimum=1,
+            )
+            search_max_input_bytes = _integer(
+                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_INPUT_BYTES
+                if token_search_max_input_bytes is None
+                else token_search_max_input_bytes,
+                "token_search_max_input_bytes",
+                minimum=1,
+            )
+            search_max_steps = _integer(
+                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS
+                if token_search_max_steps is None
+                else token_search_max_steps,
+                "token_search_max_steps",
+                minimum=1,
+            )
+        else:
+            if any(
+                value is not None
+                for value in (
+                    token_search_max_calls,
+                    token_search_max_input_bytes,
+                    token_search_max_steps,
+                )
+            ):
+                raise ValueError(
+                    "token search envelopes are only valid for arbitrary counters"
+                )
+            search_max_calls = None
+            search_max_input_bytes = None
+            search_max_steps = None
     else:
         budget = _integer(
             DEFAULT_MAX_CHARS if max_chars is None else max_chars,
             "max_chars",
             minimum=1,
         )
-        if token_counter is not None or token_counter_id is not None:
-            raise ValueError("token_counter options require max_tokens")
+        if (
+            token_counter is not None
+            or token_counter_id is not None
+            or token_counter_policy is not None
+            or token_search_max_calls is not None
+            or token_search_max_input_bytes is not None
+            or token_search_max_steps is not None
+        ):
+            raise ValueError("token counter options require max_tokens")
         if overlap_tokens:
             raise ValueError("overlap_tokens requires max_tokens")
         overlap = _integer(overlap_chars, "overlap_chars", minimum=0)
         unit_kind = "characters"
+        counter_policy = None
+        search_max_calls = None
+        search_max_input_bytes = None
+        search_max_steps = None
     if overlap >= budget:
         raise ValueError("overlap must be smaller than the budget")
 
@@ -984,15 +1348,19 @@ def iter_chunks(
         return
 
     manifest = ChunkingManifest(
-        _digest(source),
-        document_id,
-        unit_kind,
-        budget,
-        overlap,
-        respect_boundaries,
-        policy,
-        hierarchy.manifest,
-        token_counter_id,
+        source_sha256=_digest(source),
+        document_id=document_id,
+        unit_kind=unit_kind,
+        budget=budget,
+        overlap=overlap,
+        respect_boundaries=respect_boundaries,
+        container_policy=policy,
+        hierarchy_manifest=hierarchy.manifest,
+        token_counter_id=token_counter_id,
+        token_counter_policy=counter_policy,
+        token_search_max_calls=search_max_calls,
+        token_search_max_input_bytes=search_max_input_bytes,
+        token_search_max_steps=search_max_steps,
     )
     hierarchy_index = _HierarchyIndex(hierarchy)
     units = (
@@ -1001,6 +1369,40 @@ def iter_chunks(
         else _preserved_units(hierarchy.root)
     )
     chunk_index = 0
+
+    if unit_kind == "tokens" and counter_policy is TokenCounterPolicy.ARBITRARY:
+        assert token_counter is not None
+        assert search_max_calls is not None
+        assert search_max_input_bytes is not None
+        assert search_max_steps is not None
+        # Arbitrary planning is deliberately eager: limit or partition failure
+        # occurs before iter_chunks yields any partial document output.
+        planned_chunks = _plan_arbitrary_document(
+            source,
+            token_counter,
+            hierarchy_index.boundaries,
+            hierarchy_index.headings,
+            units,
+            budget=budget,
+            overlap=overlap,
+            respect_boundaries=respect_boundaries,
+            max_calls=search_max_calls,
+            max_input_bytes=search_max_input_bytes,
+            max_steps=search_max_steps,
+        )
+        for planned in planned_chunks:
+            yield _make_chunk(
+                index_number=chunk_index,
+                source=source,
+                hierarchy_index=hierarchy_index,
+                start=planned.context_start,
+                end=planned.end,
+                new_content_start=planned.fresh_start,
+                unit_count=planned.unit_count,
+                manifest=manifest,
+            )
+            chunk_index += 1
+        return
 
     for unit_start, unit_end in units:
         fresh_start = unit_start
@@ -1103,6 +1505,10 @@ def chunk_document(
     max_tokens: int | None = None,
     token_counter: TokenCounter | None = None,
     token_counter_id: str | None = None,
+    token_counter_policy: TokenCounterPolicy | str | None = None,
+    token_search_max_calls: int | None = None,
+    token_search_max_input_bytes: int | None = None,
+    token_search_max_steps: int | None = None,
     overlap_chars: int = 0,
     overlap_tokens: int = 0,
     respect_boundaries: bool = True,
@@ -1124,6 +1530,10 @@ def chunk_document(
             max_tokens=max_tokens,
             token_counter=token_counter,
             token_counter_id=token_counter_id,
+            token_counter_policy=token_counter_policy,
+            token_search_max_calls=token_search_max_calls,
+            token_search_max_input_bytes=token_search_max_input_bytes,
+            token_search_max_steps=token_search_max_steps,
             overlap_chars=overlap_chars,
             overlap_tokens=overlap_tokens,
             respect_boundaries=respect_boundaries,
@@ -1168,6 +1578,9 @@ def reconstruct_chunks(chunks: Iterable[DocumentChunk]) -> str:
 __all__ = [
     "CHUNKING_SCHEMA_VERSION",
     "CHUNKING_SERIALIZER_VERSION",
+    "DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_CALLS",
+    "DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_INPUT_BYTES",
+    "DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS",
     "DEFAULT_MAX_CHARS",
     "ChunkingManifest",
     "ChunkProvenance",
@@ -1175,6 +1588,8 @@ __all__ = [
     "DocumentChunk",
     "SegmentReference",
     "TokenCounter",
+    "TokenCounterPolicy",
+    "TokenSearchLimitExceeded",
     "chunk_document",
     "compute_chunk_metadata_sha256",
     "compute_provenance_sha256",

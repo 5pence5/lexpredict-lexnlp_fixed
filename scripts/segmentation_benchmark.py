@@ -28,7 +28,11 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 if str(REPOSITORY_ROOT) not in sys.path:
     sys.path.insert(0, str(REPOSITORY_ROOT))
 
-from lexnlp.nlp.en.segments.chunks import chunk_document, count_tokens
+from lexnlp.nlp.en.segments.chunks import (
+    TokenCounterPolicy,
+    chunk_document,
+    count_tokens,
+)
 from lexnlp.nlp.en.segments.hierarchy import SegmentKind, StructureProfile, segment_document
 from lexnlp.nlp.en.tests.segmentation_quality import deterministic_sentence_spans
 
@@ -94,6 +98,7 @@ def run_benchmark(
             "overlap_tokens": 10,
             "token_counter": count_tokens,
             "token_counter_id": "lexnlp-count-tokens-v1",
+            "token_counter_policy": TokenCounterPolicy.MONOTONIC.value,
         }
 
     timings = []

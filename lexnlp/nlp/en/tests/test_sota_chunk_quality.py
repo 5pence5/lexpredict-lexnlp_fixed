@@ -6,6 +6,7 @@ import pytest
 from lexnlp.nlp.en.segments.chunks import (
     DEFAULT_MAX_CHARS,
     ContainerPolicy,
+    TokenCounterPolicy,
     chunk_document,
     count_tokens,
 )
@@ -104,6 +105,7 @@ def test_token_budget_and_overlap_are_strict_and_reproducible():
         "overlap_tokens": 2,
         "token_counter": count_tokens,
         "token_counter_id": "lexnlp-count-tokens-v1",
+        "token_counter_policy": TokenCounterPolicy.MONOTONIC,
     }
     first = chunks(text, **kwargs)
     second = chunks(text, **kwargs)
@@ -124,6 +126,10 @@ def test_non_monotonic_token_counter_cannot_break_the_hard_cap():
         max_tokens=6,
         token_counter=deliberately_non_monotonic,
         token_counter_id="test-non-monotonic-v1",
+        token_counter_policy=TokenCounterPolicy.ARBITRARY,
+        token_search_max_calls=5_000,
+        token_search_max_input_bytes=100_000,
+        token_search_max_steps=20_000,
     )
     assert result
     assert_chunk_invariants(

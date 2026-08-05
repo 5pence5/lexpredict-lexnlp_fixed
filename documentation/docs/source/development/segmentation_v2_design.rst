@@ -70,7 +70,9 @@ Identity and determinism
 * `HierarchyManifest.tree_sha256` hashes the complete realised tree, including
   labels, levels and attributes.
 * `ChunkingManifest.manifest_id` hashes canonical source, hierarchy, budget,
-  overlap, boundary/container policy, token-counter and schema evidence.
+  overlap, boundary/container policy, token-counter identity/capability/search
+  envelope and schema evidence.  Chunking schema v2 therefore gives policy or
+  envelope changes distinct manifest and chunk identities.
 * Each chunk independently authenticates full text (including overlap), all
   provenance partitions and canonical per-chunk metadata.
 * `chunk_id` is source-, manifest- and chunk-metadata-qualified.
@@ -83,8 +85,21 @@ Identity and determinism
 Budget correctness
 ~~~~~~~~~~~~~~~~~~
 
-* Token mode requires the actual counter and `token_counter_id`.
-* Every source slice is independently verified against its strict limit.
+* Token mode requires the actual deterministic counter, `token_counter_id`
+  and an explicit `TokenCounterPolicy`; capability is never inferred.
+* `MONOTONIC` declares two-sided substring-inclusion monotonicity:
+  extending a fixed context to the right cannot reduce endpoint counts, and
+  extending a fixed fresh boundary to the left cannot reduce overlap counts.
+  It uses bounded exponential/binary searches.
+* `ARBITRARY` makes no monotonicity claim.  It exhaustively backtracks over
+  character endpoints and feasible overlap contexts, completing all units
+  before the first output.  Calls, UTF-8 input bytes and candidate/search steps
+  have authenticated finite envelopes.
+* Exhaustion raises typed `TokenSearchLimitExceeded` before the over-limit
+  counter call or any partial chunk output; it is not reported as proof that no
+  partition exists.
+* Every returned source slice is independently verified against its strict
+  limit.
 * `render_embedding_payload` counts the exact final context-plus-source string.
 * Overflow is typed and never silently truncated.
 * Text added after rendering is outside the validated payload.
@@ -106,6 +121,8 @@ Implemented pipeline
     `PACK_SIBLINGS` is explicit dense packing.  Oversized containers descend
     through finer boundaries before a hard strict split.  Overlap is inside the
     budget and can be reduced to avoid damaging a fitting container.
+    `respect_boundaries=False` is a true raw-endpoint opt-out, including
+    heading fences.
 
 `final payload serialiser`
     Prepends true carried ancestry or supplied table headers under one exact
