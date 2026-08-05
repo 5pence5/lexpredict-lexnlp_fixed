@@ -256,6 +256,135 @@ class LosslessHierarchyTests(unittest.TestCase):
             "builtin.legal_structure.v1:conservative+tests.layout.v1",
         )
 
+    def test_exact_builtin_table_match_merges_external_layout_evidence(self):
+        text = (
+            "SECTION 1 PRICING\n"
+            "Intro.\n"
+            "Item | Price\n"
+            "Widget | 10\n"
+        )
+        table_start = text.index("Item | Price")
+        external = StructuralSpan(
+            SegmentKind.TABLE,
+            table_start,
+            len(text),
+            label="Pricing table",
+            level=7,
+            attributes=(
+                ("detector", "delimited_lines"),
+                ("page", "4"),
+                ("bbox", "1,2,3,4"),
+            ),
+        )
+        options = dict(
+            structural_spans=(external,),
+            structural_mode=StructuralMode.AUGMENT,
+            structural_backend_id="tests.layout.v2",
+        )
+
+        first = self.segment(text, **options)
+        second = self.segment(text, **options)
+        tables = list(first.segments(SegmentKind.TABLE))
+
+        self.assertEqual(len(tables), 1)
+        table = tables[0]
+        self.assertEqual((table.start, table.end), (table_start, len(text)))
+        self.assertEqual(table.label, "Pricing table")
+        self.assertEqual(table.level, 7)
+        self.assertEqual(
+            table.attributes,
+            (
+                ("detector", "delimited_lines"),
+                ("page", "4"),
+                ("bbox", "1,2,3,4"),
+            ),
+        )
+        self.assertEqual(first.reconstruct(), text)
+        self.assertEqual(first.manifest.tree_sha256, second.manifest.tree_sha256)
+
+        first_chunks = chunk_document(first, max_chars=64)
+        second_chunks = chunk_document(second, max_chars=64)
+        table_reference = next(
+            reference
+            for chunk in first_chunks
+            for reference in chunk.provenance.segments
+            if reference.kind is SegmentKind.TABLE
+        )
+        self.assertEqual(table_reference.attributes, table.attributes)
+        self.assertEqual(reconstruct_chunks(first_chunks), text)
+        self.assertEqual(
+            [chunk.chunk_id for chunk in first_chunks],
+            [chunk.chunk_id for chunk in second_chunks],
+        )
+
+        replaced = self.segment(
+            text,
+            structural_spans=(external,),
+            structural_backend_id="tests.layout.v2",
+        )
+        replaced_table = next(replaced.segments(SegmentKind.TABLE))
+        self.assertEqual(replaced_table.attributes, external.attributes)
+
+    def test_augment_exact_match_keeps_structural_conflicts_explicit(self):
+        text = "Item | Price\nWidget | 10\n"
+        external = StructuralSpan(
+            SegmentKind.TABLE,
+            0,
+            len(text),
+            attributes=(("page", "4"),),
+        )
+        common = dict(
+            structural_mode=StructuralMode.AUGMENT,
+            structural_backend_id="tests.layout.v2",
+        )
+
+        with self.assertRaisesRegex(ValueError, "identical structural ranges"):
+            self.segment(
+                text,
+                structural_spans=(external, external),
+                **common,
+            )
+        with self.assertRaisesRegex(ValueError, "different kinds"):
+            self.segment(
+                text,
+                structural_spans=(
+                    StructuralSpan(SegmentKind.CLAUSE, 0, len(text)),
+                ),
+                **common,
+            )
+        with self.assertRaisesRegex(ValueError, "conflicting structural attribute"):
+            self.segment(
+                text,
+                structural_spans=(
+                    StructuralSpan(
+                        SegmentKind.TABLE,
+                        0,
+                        len(text),
+                        attributes=(("detector", "caller-layout"),),
+                    ),
+                ),
+                **common,
+            )
+
+        crossing_text = (
+            "SECTION 1 FIRST\n"
+            "one\n"
+            "SECTION 2 SECOND\n"
+            "two\n"
+        )
+        with self.assertRaisesRegex(ValueError, "crossing"):
+            self.segment(
+                crossing_text,
+                structural_spans=(
+                    StructuralSpan(
+                        SegmentKind.TABLE,
+                        crossing_text.index("one"),
+                        crossing_text.index("two") + len("two"),
+                    ),
+                ),
+                **common,
+            )
+
     def test_replace_tree_digest_distinguishes_realised_structure(self):
         text = "operative text"
         common = dict(

@@ -1011,6 +1011,71 @@ def _validate_structural_spans(
     return ordered
 
 
+def _merge_augmented_span(
+    builtin: StructuralSpan,
+    external: StructuralSpan,
+) -> StructuralSpan:
+    """Merge exact-range evidence without losing built-in detector metadata."""
+
+    if (
+        builtin.start != external.start
+        or builtin.end != external.end
+        or builtin.kind is not external.kind
+    ):
+        raise ValueError("augmented spans must have the same range and kind")
+
+    attributes = list(builtin.attributes)
+    builtin_attributes = dict(builtin.attributes)
+    for name, value in external.attributes:
+        if name in builtin_attributes:
+            if builtin_attributes[name] != value:
+                raise ValueError(
+                    "conflicting structural attribute for identical augmented "
+                    f"{builtin.kind.value} range {builtin.start}:{builtin.end}: "
+                    f"{name!r}"
+                )
+            continue
+        attributes.append((name, value))
+
+    return replace(
+        builtin,
+        label=external.label if external.label is not None else builtin.label,
+        level=external.level if external.level is not None else builtin.level,
+        attributes=tuple(attributes),
+    )
+
+
+def _augment_structural_spans(
+    builtins: Sequence[StructuralSpan],
+    external: Sequence[StructuralSpan],
+) -> tuple[StructuralSpan, ...]:
+    """Combine caller evidence with built-ins, reconciling exact matches once."""
+
+    result = list(builtins)
+    builtin_by_range = {
+        (span.start, span.end): index for index, span in enumerate(builtins)
+    }
+    for caller_span in external:
+        key = (caller_span.start, caller_span.end)
+        builtin_index = builtin_by_range.get(key)
+        if builtin_index is None:
+            result.append(caller_span)
+            continue
+
+        builtin_span = result[builtin_index]
+        if builtin_span.kind is not caller_span.kind:
+            raise ValueError(
+                "identical structural ranges have different kinds in augment "
+                f"mode: {key} ({builtin_span.kind.value}, "
+                f"{caller_span.kind.value})"
+            )
+        result[builtin_index] = _merge_augmented_span(
+            builtin_span,
+            caller_span,
+        )
+    return tuple(result)
+
+
 def _span_forest(spans: Sequence[StructuralSpan]) -> list[_SpanNode]:
     roots: list[_SpanNode] = []
     stack: list[_SpanNode] = []
@@ -1296,7 +1361,7 @@ def segment_document(
         effective_mode = mode
         if mode is StructuralMode.AUGMENT:
             builtins = _builtin_structural_spans(text, profile)
-            realised_spans = (*builtins, *external)
+            realised_spans = _augment_structural_spans(builtins, external)
             structural_id = (
                 f"builtin.legal_structure.v1:{profile.value}+{external_id}"
             )

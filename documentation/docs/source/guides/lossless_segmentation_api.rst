@@ -108,6 +108,15 @@ profile and records a composite detector identity::
         structural_backend_id="example-layout-adapter@1",
     )
 
+When an `AUGMENT` caller span has the same range and kind as a built-in span,
+the realised hierarchy contains one reconciled node.  A non-`None` caller
+`label` or `level` takes precedence.  Built-in detector and heading attributes
+are retained, and non-conflicting caller attributes are appended in caller
+order.  The same attribute name may be supplied by both sources only with the
+same value.  Conflicting attribute values, identical ranges with different
+kinds, duplicate caller ranges and crossing ranges remain errors.  `REPLACE`
+mode does not apply this reconciliation.
+
 `paragraph_segmenter` receives one structural region at a time; the selected
 `sentence_segmenter` receives each paragraph.  Both yield relative
 `(start, end)` or `(start, end, text)` tuples.  Returned spans must be ordered,
