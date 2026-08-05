@@ -520,9 +520,17 @@ def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
             or any(contains_protected[id(child)] for child in node.children)
         )
 
-    units: list[tuple[int, int, bool]] = []
+    # Scope unprotected gaps to their nearest protected ancestor.  A protected
+    # parent containing deeper protected nodes is still a hard fence even when
+    # no leaf unit is emitted at the parent's own boundary.
+    units: list[tuple[int, int, bool, int | None]] = []
 
-    def emit(start: int, end: int, protected: bool) -> None:
+    def emit(
+        start: int,
+        end: int,
+        protected: bool,
+        protected_scope: int | None,
+    ) -> None:
         if start >= end:
             return
         if (
@@ -530,31 +538,36 @@ def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
             and units
             and not units[-1][2]
             and units[-1][1] == start
+            and units[-1][3] == protected_scope
         ):
-            units[-1] = (units[-1][0], end, False)
+            units[-1] = (units[-1][0], end, False, protected_scope)
         else:
-            units.append((start, end, protected))
+            units.append((start, end, protected, protected_scope))
 
-    def visit(node: Segment) -> None:
+    def visit(node: Segment, protected_scope: int | None) -> None:
+        if node.kind in _PROTECTED_KINDS:
+            protected_scope = id(node)
         protected_children = [
             child for child in node.children if contains_protected[id(child)]
         ]
         if node.kind in _PROTECTED_KINDS and not protected_children:
-            emit(node.start, node.end, True)
+            emit(node.start, node.end, True, protected_scope)
             return
         if not protected_children:
-            emit(node.start, node.end, False)
+            emit(node.start, node.end, False, protected_scope)
             return
 
         cursor = node.start
         for child in protected_children:
-            emit(cursor, child.start, False)
-            visit(child)
+            emit(cursor, child.start, False, protected_scope)
+            visit(child, protected_scope)
             cursor = child.end
-        emit(cursor, node.end, False)
+        emit(cursor, node.end, False, protected_scope)
 
-    visit(root)
-    return tuple((start, end) for start, end, _protected in units)
+    visit(root, None)
+    return tuple(
+        (start, end) for start, end, _protected, _scope in units
+    )
 
 
 class _HeadingIndex:
@@ -984,7 +997,7 @@ def iter_chunks(
     hierarchy_index = _HierarchyIndex(hierarchy)
     units = (
         ((0, len(source)),)
-        if policy is ContainerPolicy.PACK_SIBLINGS
+        if not respect_boundaries or policy is ContainerPolicy.PACK_SIBLINGS
         else _preserved_units(hierarchy.root)
     )
     chunk_index = 0

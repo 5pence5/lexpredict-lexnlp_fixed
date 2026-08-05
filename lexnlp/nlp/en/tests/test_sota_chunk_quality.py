@@ -9,7 +9,12 @@ from lexnlp.nlp.en.segments.chunks import (
     chunk_document,
     count_tokens,
 )
-from lexnlp.nlp.en.segments.hierarchy import StructureProfile, segment_document
+from lexnlp.nlp.en.segments.hierarchy import (
+    SegmentKind,
+    StructuralSpan,
+    StructureProfile,
+    segment_document,
+)
 from lexnlp.nlp.en.tests.segmentation_quality import (
     assert_lossless_hierarchy,
     deterministic_sentence_spans,
@@ -17,6 +22,13 @@ from lexnlp.nlp.en.tests.segmentation_quality import (
 
 
 BACKEND_ID = "lexnlp-hermetic-regression-sentences-v1"
+WHOLE_SPAN_BACKEND_ID = "lexnlp-hermetic-whole-span-v1"
+
+
+def whole_span(text):
+    if not text:
+        return ()
+    return ((0, len(text), text),)
 
 
 def chunks(text, **kwargs):
@@ -148,6 +160,56 @@ SECTION_TEXT = (
 )
 
 
+
+def test_preserve_policy_fences_table_gaps_to_their_enclosing_section():
+    text = "1. FIRST\nA | B | C\npost\n2. SECOND\nD | E | F\npost2"
+    hierarchy = segment_document(
+        text,
+        paragraph_segmenter=whole_span,
+        sentence_segmenter=whole_span,
+        paragraph_backend_id=WHOLE_SPAN_BACKEND_ID,
+        sentence_backend_id=WHOLE_SPAN_BACKEND_ID,
+    )
+    result = chunk_document(hierarchy, max_chars=100)
+    section_boundary = text.index("2. SECOND")
+    assert [(chunk.start, chunk.end) for chunk in result] == [
+        (0, 9),
+        (9, 19),
+        (19, section_boundary),
+        (section_boundary, 34),
+        (34, 44),
+        (44, len(text)),
+    ]
+    assert not any(
+        chunk.start < section_boundary < chunk.end for chunk in result
+    )
+    assert_chunk_invariants(text, result, max_chars=100)
+
+
+def test_preserve_policy_keeps_a_table_nested_under_a_list_item_atomic():
+    text = "• Charges\nA | B | C\n1 | 2 | 3\ntail"
+    table_start = text.index("A | B | C")
+    table_end = text.index("tail")
+    hierarchy = segment_document(
+        text,
+        structural_spans=(
+            StructuralSpan(SegmentKind.LIST_ITEM, 0, len(text)),
+            StructuralSpan(SegmentKind.TABLE, table_start, table_end),
+        ),
+        paragraph_segmenter=whole_span,
+        sentence_segmenter=whole_span,
+        paragraph_backend_id=WHOLE_SPAN_BACKEND_ID,
+        sentence_backend_id=WHOLE_SPAN_BACKEND_ID,
+    )
+    result = chunk_document(hierarchy, max_chars=100)
+    assert [(chunk.start, chunk.end) for chunk in result] == [
+        (0, table_start),
+        (table_start, table_end),
+        (table_end, len(text)),
+    ]
+    assert_chunk_invariants(text, result, max_chars=100)
+
+
 @pytest.mark.parametrize("max_chars", [30, 60, 100])
 def test_default_preserve_policy_never_crosses_complete_top_level_sections(max_chars):
     result = chunks(SECTION_TEXT, max_chars=max_chars)
@@ -170,6 +232,41 @@ def test_pack_siblings_is_explicit_and_never_bisects_a_heading():
         chunk.end in heading_starts[1:] + [len(SECTION_TEXT)]
         for chunk in packed
     )
+
+
+
+def test_boundary_opt_out_makes_container_policies_plan_identical_chunks():
+    kwargs = {
+        "max_chars": 17,
+        "overlap_chars": 3,
+        "respect_boundaries": False,
+    }
+    preserved = chunks(
+        SECTION_TEXT,
+        container_policy=ContainerPolicy.PRESERVE,
+        **kwargs,
+    )
+    packed = chunks(
+        SECTION_TEXT,
+        container_policy=ContainerPolicy.PACK_SIBLINGS,
+        **kwargs,
+    )
+
+    def signature(result):
+        return [
+            (
+                chunk.start,
+                chunk.new_content_start,
+                chunk.end,
+                chunk.text,
+                chunk.unit_count,
+            )
+            for chunk in result
+        ]
+
+    assert signature(preserved) == signature(packed)
+    assert_chunk_invariants(SECTION_TEXT, preserved, max_chars=17)
+    assert_chunk_invariants(SECTION_TEXT, packed, max_chars=17)
 
 
 def test_preserve_policy_drops_overlap_at_complete_protected_sections():
