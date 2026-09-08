@@ -145,13 +145,19 @@ class UniversalCourtsParser:
 
         # if the whole text doesn't contain the key word (-gericht), skip all the following
         if self.phrase_match_pattern is not None:
-            if self.phrase_match_pattern.search(text, re.IGNORECASE) is None:
+            # NB: no second argument. ``re.Pattern.search`` takes ``pos`` there,
+            # not ``flags`` -- passing ``re.IGNORECASE`` (== 2) started the scan
+            # at offset 2 and silently discarded every court whose keyword began
+            # at index 0 or 1 ("Tribunal Superior de Justicia ...", "Tribunal
+            # Superior do Trabalho"). Case-insensitivity already comes from how
+            # the caller compiled ``court_pattern_checker``.
+            if self.phrase_match_pattern.search(text) is None:
                 return
 
         for phrase in self.proc.split_text_on_line_with_endings(text):
             # if the phrase doesn't contain the key word (e.g., "Gericht" for German), skip the phrase
             if self.phrase_match_pattern is not None:
-                if self.phrase_match_pattern.search(phrase.text, re.IGNORECASE) is None:
+                if self.phrase_match_pattern.search(phrase.text) is None:
                     continue
             annotation = self.find_court_by_any_key(phrase)
             if annotation:
