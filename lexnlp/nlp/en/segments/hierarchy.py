@@ -285,8 +285,11 @@ def _validate_hierarchy(source: str, root: Segment) -> None:
         node, depth = stack.pop()
         if depth > MAX_HIERARCHY_DEPTH:
             raise ValueError(f"hierarchy exceeds MAX_HIERARCHY_DEPTH={MAX_HIERARCHY_DEPTH}")
+        # Unreachable: the root must span exactly len(source), and every child
+        # end is checked against its parent end before it is ever pushed, so a
+        # popped node always satisfies node.end <= len(source).
         if node.end > len(source):
-            raise ValueError(f"{node.segment_id} lies outside source")
+            raise ValueError(f"{node.segment_id} lies outside source")  # pragma: no cover
         if node.segment_id in seen:
             raise ValueError(f"duplicate segment identity {node.segment_id!r}")
         seen.add(node.segment_id)
@@ -323,8 +326,10 @@ class DocumentHierarchy:
             object.__setattr__(self, "manifest", replace(self.manifest, tree_sha256=realised))
         elif self.manifest.tree_sha256 != realised:
             raise ValueError("hierarchy tree does not match manifest tree_sha256")
+        # Unreachable: validated children tile every parent exactly and the root
+        # spans the source, so the leaf concatenation always equals the source.
         if self.reconstruct() != self.source:
-            raise ValueError("hierarchy does not reconstruct the exact source")
+            raise ValueError("hierarchy does not reconstruct the exact source")  # pragma: no cover
 
     @classmethod
     def from_segments(
@@ -427,7 +432,9 @@ def _split_lines(text: str) -> list[_Line]:
         end = offset + len(raw)
         result.append(_Line(index, offset, offset + len(content), end, content, content.strip()))
         offset = end
-    if offset < len(text):
+    # Unreachable: str.splitlines(keepends=True) always round-trips, so the
+    # loop always advances offset to exactly len(text).
+    if offset < len(text):  # pragma: no cover
         content = text[offset:]
         result.append(_Line(len(result), offset, len(text), len(text), content, content.strip()))
     return result
@@ -882,8 +889,12 @@ def _table_spans(
         while container_index < len(ordered_containers) and ordered_containers[container_index].start <= start:
             candidate = ordered_containers[container_index]
             container_index += 1
+            # Unreachable: every stacked container has end > this block start
+            # (older ones are popped above; new ones are appended only when
+            # end > start), while candidate.start <= start, so the condition
+            # is false on first check and the body can never run.
             while active and candidate.start >= active[-1].end:
-                active.pop()
+                active.pop()  # pragma: no cover
             if candidate.end <= start:
                 continue
             active.append(candidate)

@@ -802,7 +802,8 @@ def _raw_token_end(
     while last_feasible < limit:
         candidate = min(limit, fresh_start + distance * 2)
         if candidate <= last_feasible:
-            candidate = min(limit, last_feasible + 1)
+            # Unreachable: doubling strictly advances past last_feasible while it stays below limit.
+            candidate = min(limit, last_feasible + 1)  # pragma: no cover
         if cache.count(context_start, candidate) <= budget:
             last_feasible = candidate
             if candidate == limit:
@@ -867,7 +868,8 @@ def _token_end(
         candidate = boundary_limit
     count = cache.count(context_start, candidate)
     if count > budget or candidate <= fresh_start:
-        return None
+        # Unreachable: candidate re-reads the cache entry written by its own feasibility check above.
+        return None  # pragma: no cover
     return candidate, count
 
 
@@ -1446,7 +1448,8 @@ def iter_chunks(
             if unit_kind == "characters":
                 context_start = fresh_start if first_in_unit else max(unit_start, fresh_start - overlap)
                 if context_start + budget <= fresh_start:
-                    context_start = fresh_start
+                    # Unreachable: overlap < budget is validated, so context_start + budget exceeds fresh_start.
+                    context_start = fresh_start  # pragma: no cover
                 hard_end = min(unit_end, context_start + budget)
                 end = _boundary_end(
                     hierarchy_index.boundaries,
@@ -1477,9 +1480,10 @@ def iter_chunks(
                         ):
                             end = fitting_end
                 if end <= fresh_start:
-                    context_start = fresh_start
-                    hard_end = min(unit_end, context_start + budget)
-                    end = _boundary_end(
+                    # Unreachable: _boundary_end always advances past fresh_start when hard_end does.
+                    context_start = fresh_start  # pragma: no cover
+                    hard_end = min(unit_end, context_start + budget)  # pragma: no cover
+                    end = _boundary_end(  # pragma: no cover
                         hierarchy_index.boundaries,
                         hierarchy_index.headings,
                         fresh_start=fresh_start,
@@ -1487,7 +1491,8 @@ def iter_chunks(
                         respect_boundaries=respect_boundaries,
                     )
                 if end <= fresh_start:
-                    end = min(unit_end, fresh_start + budget)
+                    # Unreachable: same guard as above, so the recomputed end still advances.
+                    end = min(unit_end, fresh_start + budget)  # pragma: no cover
                 unit_count = end - context_start
             else:
                 assert token_counter is not None
@@ -1564,7 +1569,8 @@ def iter_chunks(
                 end, unit_count = planned
 
             if end <= fresh_start or unit_count > budget:
-                raise RuntimeError("chunk planner violated its strict progress invariant")
+                # Unreachable: every planning path advances within budget; token misses raise ValueError instead.
+                raise RuntimeError("chunk planner violated its strict progress invariant")  # pragma: no cover
             yield _make_chunk(
                 index_number=chunk_index,
                 source=source,

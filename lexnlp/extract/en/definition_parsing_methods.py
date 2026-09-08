@@ -451,7 +451,9 @@ def split_definitions_inside_term(
     )
 
     if len(match_coords) < len(matches):
-        return [(term, term_start, term_end)]
+        # Unreachable: find_phrase_in_source_text always returns one coord
+        # tuple per input phrase, so the counts can never differ.
+        return [(term, term_start, term_end)]  # pragma: no cover
 
     match_coords = [(m[0], m[1] + src_start, m[2] + src_start) for m in match_coords]
 

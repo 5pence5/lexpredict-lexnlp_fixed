@@ -57,7 +57,8 @@ def get_trademark_annotations(text: str) -> Iterator[TrademarkAnnotation]:
     for match in TRADEMARK_PTN_RE.finditer(text):
         coords = match.span()
         if coords[1] > len(text):
-            coords = (coords[0], len(text))
+            # finditer spans always lie within [0, len(text)], so clamping is impossible.
+            coords = (coords[0], len(text))  # pragma: no cover
         yield TrademarkAnnotation(coords=coords, trademark=match.group(), text=match.group(), locale="pt")
 
 

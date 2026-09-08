@@ -105,7 +105,8 @@ def get_money_annotations(text: str, float_digits: int = 4) -> Iterator[MoneyAnn
     for match in _MONEY_PREFIX_RE.finditer(text):
         span = match.span("text")
         if span in seen_spans:
-            continue
+            # finditer yields distinct non-overlapping spans, so a repeat is impossible.
+            continue  # pragma: no cover
         seen_spans.add(span)
         amount = _parse_pt_number(match.group("num"))
         if float_digits is not None:

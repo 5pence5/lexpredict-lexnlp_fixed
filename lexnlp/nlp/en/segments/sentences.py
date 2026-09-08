@@ -109,7 +109,8 @@ def post_process_sentence(text: str, sent_span: tuple[int, int]) -> Generator[tu
     for m in SENTENCE_SPLITTERS.finditer(sent):
         full_match_start = m.start()
         if SENTENCE_SPLITTERS_LOWER_EXCLUDE.fullmatch(m.group().lower()):
-            continue
+            # Unreachable: splitters yield blank lines or 5+ space/dot runs, never bare "and".
+            continue  # pragma: no cover
 
         # If we found text splitter and there is some text between sentence start/prev splitter
         # and the new found splitter - yield it as a separate sentence.

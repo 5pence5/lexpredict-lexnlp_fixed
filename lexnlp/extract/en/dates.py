@@ -259,7 +259,10 @@ def get_raw_dates(text, strict=False, base_date=None, return_source=False, local
                 else:
                     continue  # executed if the loop ended normally (no break)
                 break  # executed if 'continue' was skipped (break)
-        except TypeError:
+        # Unreachable: date_string is always str (yielded by DateFinder), so
+        # split/slice/join cannot raise TypeError, and any TypeError from
+        # parse_date_string is already swallowed by the inner except Exception.
+        except TypeError:  # pragma: no cover
             possible_matched.append(False)
             continue
 

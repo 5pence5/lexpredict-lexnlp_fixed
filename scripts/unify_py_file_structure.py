@@ -64,7 +64,8 @@ def unify_file_structure(release_number):
             imports = (current_structure["imports"] or "").strip()
             code = (current_structure["code"] or "").strip()
         else:
-            service = imports = code = docstr = ""
+            # Unreachable: groups before code are optional and code is DOTALL .*, so fullmatch never fails.
+            service = imports = code = docstr = ""  # pragma: no cover
 
         new_file_content = "".join(
             [

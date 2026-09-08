@@ -95,8 +95,11 @@ class TextBeautifier:
                 else:
                     stack -= 1
             elif c in open_set:
+                # Unreachable: flip_stack is True only for quotes, where open_set and
+                # close_set are the same QUOTES set, so every quote char takes the
+                # close_set branch above and this elif never runs with flip_stack True.
                 if flip_stack:
-                    stack = 1 if not stack else 0
+                    stack = 1 if not stack else 0  # pragma: no cover
                 else:
                     stack += 1
             if not stack:

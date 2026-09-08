@@ -343,7 +343,10 @@ class CompanyDetector:
                 if person.lower().endswith(" and"):
                     person = person[0:-4]
                 elif person.endswith(" &"):
-                    person = person[0:-2]
+                    # Unreachable: "&" is in string.punctuation, so the
+                    # .strip(string.punctuation) cleanup above always removes
+                    # a trailing "&" before this check runs.
+                    person = person[0:-2]  # pragma: no cover
 
                 if return_source:
                     yield person, sentence
