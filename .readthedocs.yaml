@@ -1,0 +1,30 @@
+---
+# Read the Docs configuration file for Sphinx projects.
+# See https://docs.readthedocs.com/platform/stable/config-file/v2.html.
+#
+# This replaces the old readthedocs.yml, which pinned Python 3.8 and installed
+# from python-requirements.txt, a file that no longer exists, so the hosted
+# build could not have succeeded.
+
+version: 2
+
+formats: all
+
+build:
+  os: ubuntu-24.04
+  tools:
+    # Matches requires-python (>=3.13,<3.15) and the CI PYTHON_VERSION.
+    python: "3.13"
+
+sphinx:
+  configuration: documentation/docs/source/conf.py
+  # The CI documentation job builds with -W; hold the hosted build to the same
+  # standard so the two cannot drift.
+  fail_on_warning: true
+
+python:
+  install:
+    - method: pip
+      path: .
+      extra_requirements:
+        - docs
