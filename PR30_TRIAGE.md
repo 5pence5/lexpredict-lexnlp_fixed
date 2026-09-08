@@ -169,3 +169,38 @@ caught it; the unit tests I had run did not. The source is restored and the
 behaviour is now pinned by characterisation tests that say plainly which parts
 are wrong and why correcting them requires retraining the model in the same
 change.
+
+## Tests and coverage
+
+The suite was failing on master before any of this work, and coverage was
+measured at 89%.
+
+| | Before | After |
+| --- | --- | --- |
+| Tests passing | 1,798 | 3,765 |
+| Tests failing | 6 | 0 |
+| Source coverage | 89.0% | 99.79% |
+| Source modules at 100% | not measured | 249 of 264 |
+| Uncovered source statements | 3,359 | 33 |
+| Documentation build warnings | 181 | 0, and `-W` passes |
+| Known dependency vulnerabilities | 38 | 0, one ignored with a recorded reason |
+
+Coverage tests were written by muse and grok, dispatched in two rounds: 42
+batches over the 168 modules that had uncovered lines, then 8 more over the 31
+that were still short, most of them code added after the first round ran. Each
+agent received the exact line numbers its suite was not reaching. Every
+generated test was run before being committed, and the ones that failed or were
+vacuous were rewritten by hand.
+
+The 33 statements still uncovered are, with two exceptions, defensive code that
+cannot be reached without stubbing the unit under test: invariant guards that
+raise when the chunk planner fails to make progress or the hierarchy does not
+reconstruct its source byte for byte, and `continue` arms the agents proved
+dead by argument, by exhausting a translation map, and in one case by a
+200,000-sentence fuzz. The two exceptions are a script block that downloads
+from the Unicode FTP site and a model-training branch that needs a fitted
+estimator.
+
+An early measurement reported 97%. That figure was wrong: a `.coverage` data
+file left behind by a run killed part-way had been merged into it. Deleting the
+stale file and re-measuring gives the numbers above.
