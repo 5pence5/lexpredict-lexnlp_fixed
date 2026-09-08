@@ -115,3 +115,6 @@ artifacts/
 benchmarks
 lexnlp/extract/en/contracts/data/*.model
 /.pytest_cache/
+
+# macOS
+.DS_Store
