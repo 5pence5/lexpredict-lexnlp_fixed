@@ -50,9 +50,7 @@ def _run_with_candidates(monkeypatch, text, candidates, **kwargs):
 
 class TestLocale_epi:
     def test_locale_string_is_converted(self) -> None:
-        assert get_raw_date_list("June 1, 2017", locale="en-US", base_date=BASE) == [
-            datetime.date(2017, 6, 1)
-        ]
+        assert get_raw_date_list("June 1, 2017", locale="en-US", base_date=BASE) == [datetime.date(2017, 6, 1)]
 
 
 class TestRawDateFilters:
@@ -96,9 +94,7 @@ class TestRawDateFilters:
                 ),
             ),
         ]
-        assert _run_with_candidates(monkeypatch, "June x 5, 2017", candidates) == [
-            datetime.date(2017, 6, 5)
-        ]
+        assert _run_with_candidates(monkeypatch, "June x 5, 2017", candidates) == [datetime.date(2017, 6, 5)]
 
     def test_overlong_candidate_rejected(self, monkeypatch) -> None:
         date_string = "June 2017" + " x" * 20
@@ -132,9 +128,7 @@ class TestRawDateFilters:
                 ),
             ),
         ]
-        assert _run_with_candidates(monkeypatch, "x" * 20, candidates) == [
-            datetime.date(2017, 6, 1)
-        ]
+        assert _run_with_candidates(monkeypatch, "x" * 20, candidates) == [datetime.date(2017, 6, 1)]
 
     def test_parse_failure_yields_no_date(self, monkeypatch) -> None:
         def boom(self, date_string, captures, locale=None):
@@ -213,9 +207,7 @@ class TestTrainDefaultModel:
             assert callable(parse_dates)
 
         monkeypatch.setattr(dates_mod, "build_date_model", fake_build)
-        monkeypatch.setattr(
-            dates_mod, "random", SimpleNamespace(random=lambda: 0.99, randint=lambda a, b: 2)
-        )
+        monkeypatch.setattr(dates_mod, "random", SimpleNamespace(random=lambda: 0.99, randint=lambda a, b: 2))
         monkeypatch.chdir(tmp_path)
         (tmp_path / "test_date_model.pickle").write_bytes(b"stale")
 
@@ -235,9 +227,7 @@ class TestTrainDefaultModel:
             assert callable(parse_dates)
 
         monkeypatch.setattr(dates_mod, "build_date_model", fake_build)
-        monkeypatch.setattr(
-            dates_mod, "random", SimpleNamespace(random=lambda: 0.0, randint=lambda a, b: 2)
-        )
+        monkeypatch.setattr(dates_mod, "random", SimpleNamespace(random=lambda: 0.0, randint=lambda a, b: 2))
 
         dates_mod.train_default_model(save=True)
 

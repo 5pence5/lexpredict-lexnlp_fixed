@@ -36,9 +36,7 @@ class TestEnsureTagDownloaded:
 
         cached = tmp_path / "model.skops"
         cached.write_bytes(b"x")
-        monkeypatch.setattr(
-            "lexnlp.ml.catalog.get_path_from_catalog", lambda tag: cached
-        )
+        monkeypatch.setattr("lexnlp.ml.catalog.get_path_from_catalog", lambda tag: cached)
 
         calls: list[str] = []
         monkeypatch.setattr(
@@ -68,9 +66,7 @@ class TestEnsureTagDownloaded:
             seen["prompt_user"] = prompt_user
 
         monkeypatch.setattr("lexnlp.ml.catalog.get_path_from_catalog", fake_get)
-        monkeypatch.setattr(
-            "lexnlp.ml.catalog.download.download_github_release", fake_download
-        )
+        monkeypatch.setattr("lexnlp.ml.catalog.download.download_github_release", fake_download)
         assert runtime_model.ensure_tag_downloaded("some/tag") == cached
         assert seen == {"tag": "some/tag", "prompt_user": False}
 
@@ -83,9 +79,7 @@ class TestLoadPipelineForTag:
         sentinel_path.write_bytes(b"x")
         sentinel_pipeline = object()
         seen: dict[str, object] = {}
-        monkeypatch.setattr(
-            runtime_model, "ensure_tag_downloaded", lambda tag: sentinel_path
-        )
+        monkeypatch.setattr(runtime_model, "ensure_tag_downloaded", lambda tag: sentinel_path)
 
         def fake_load(path, trusted: bool = False):
             seen["path"] = path
@@ -137,9 +131,7 @@ class TestCollectSamples:
                 "notes.md": "top-level notes without label dirs",
             },
         )
-        texts, labels, counts = collect_contract_type_samples(
-            archive, max_docs_per_label=2, head_character_n=20
-        )
+        texts, labels, counts = collect_contract_type_samples(archive, max_docs_per_label=2, head_character_n=20)
         assert counts == {"AAA": 2, "BBB": 1}
         assert labels == ["AAA", "AAA", "BBB"]
         assert all(len(t) <= 20 for t in texts)
@@ -168,9 +160,7 @@ class TestCollectSamples:
                 item = tarfile.TarInfo(name=name)
                 item.size = len(raw)
                 tar.addfile(item, io.BytesIO(raw))
-        texts, labels, counts = collect_contract_type_samples(
-            archive, max_docs_per_label=5, head_character_n=4000
-        )
+        texts, labels, counts = collect_contract_type_samples(archive, max_docs_per_label=5, head_character_n=4000)
         assert sorted(labels) == ["AAA", "BBB"]
         assert sum(counts.values()) == 2
         assert len(texts) == 2

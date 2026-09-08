@@ -15,16 +15,19 @@ from lexnlp.nlp.en.segments.hierarchy import (
     StructuralMode,
     StructuralSpan,
     StructureProfile,
-    _NumericCandidate,
     _attributes,
     _callable_id,
+    _delimited_blocks,
     _digest_value,
     _enum,
     _integer,
     _merge_augmented_span,
+    _NumericCandidate,
     _ordinal,
+    _outline_spans,
     _plain_segments,
     _prediction_spans,
+    _section_spans,
     _separator_intervals,
     _sequence_numbered_heading_indices,
     _span_result,
@@ -72,8 +75,8 @@ class TestEnumIntegerAttributes:
     def test_enum_lists_choices_on_invalid_value(self) -> None:
         with pytest.raises(ValueError, match="kind must be one of") as caught:
             _enum("not-a-kind", SegmentKind, "kind")
-        assert "'document'" in str(caught.exception)
-        assert "'separator'" in str(caught.exception)
+        assert "'document'" in str(caught.value)
+        assert "'separator'" in str(caught.value)
 
     def test_integer_rejects_bool_and_non_int(self) -> None:
         with pytest.raises(TypeError, match="start must be an integer"):
@@ -209,12 +212,17 @@ class TestDigestAndValidateHierarchy:
             _validate_hierarchy(source, gap_at_end)
 
     def test_depth_limit_is_enforced(self) -> None:
-        node = Segment(SegmentKind.TEXT, 0, 1)
-        for _ in range(MAX_HIERARCHY_DEPTH):
-            node = Segment(SegmentKind.PARAGRAPH, 0, 1, (node,))
-        root = Segment(SegmentKind.DOCUMENT, 0, 1, (node,), level=0)
+        # Identical (kind, start, end) identities collide before the depth
+        # check, so each wrapping level must occupy a distinct span.
+        length = MAX_HIERARCHY_DEPTH + 1
+        source = "x" * length
+        node = Segment(SegmentKind.TEXT, length - 1, length)
+        for start in range(length - 2, -1, -1):
+            head = Segment(SegmentKind.TEXT, start, start + 1)
+            node = Segment(SegmentKind.PARAGRAPH, start, length, (head, node))
+        root = Segment(SegmentKind.DOCUMENT, 0, length, (node,), level=0)
         with pytest.raises(ValueError, match="MAX_HIERARCHY_DEPTH"):
-            _validate_hierarchy("x", root)
+            _validate_hierarchy(source, root)
 
     def test_document_hierarchy_type_guards(self) -> None:
         child = Segment(SegmentKind.TEXT, 0, 1)
@@ -292,6 +300,30 @@ class TestSplitLinesOrdinalAndSequence:
 
 
 class TestOutlineTablesAndStructuralSpans:
+    def test_outline_tracks_active_section_while_collecting_list_items(self) -> None:
+        text = (
+            "SECTION 1 First\n"
+            "intro\n"
+            "SECTION 2 Second\n"
+            "(a) nested item\n"
+            "1.1 Follow-on clause\n"
+        )
+        lines = _split_lines(text)
+        _blocks, table_lines = _delimited_blocks(lines)
+        sections, heading_lines = _section_spans(
+            text,
+            lines,
+            StructureProfile.CONSERVATIVE,
+            table_lines,
+        )
+        assert [span.label for span in sections] == ["SECTION 1 First", "SECTION 2 Second"]
+        outlines = _outline_spans(text, lines, sections, heading_lines, table_lines)
+        labels = [span.label for span in outlines]
+        assert "(a)" in labels
+        item = next(span for span in outlines if span.label == "(a)")
+        second = sections[1]
+        assert second.start <= item.start < item.end <= second.end
+
     def test_section_then_list_items_are_nested(self) -> None:
         text = (
             "SECTION 1 General\n"
@@ -334,6 +366,14 @@ class TestOutlineTablesAndStructuralSpans:
         assert tables[0].start == 8
         assert tables[0].end == 12
         assert tables[0].level == 2
+
+    def test_table_spans_drops_container_that_does_not_cover_table_end(self) -> None:
+        short = StructuralSpan(SegmentKind.SECTION, 0, 10, label="short", level=1)
+        tables = _table_spans(((8, 12),), (short,))
+        assert len(tables) == 1
+        assert tables[0].level == 1
+        assert tables[0].start == 8
+        assert tables[0].end == 12
 
     def test_validate_structural_spans_type_and_bounds(self) -> None:
         with pytest.raises(TypeError, match="only StructuralSpan objects"):
@@ -380,10 +420,6 @@ class TestSpanResultPlainSegmentsAndCallableId:
         text = "Hello.\n\n<PAGE>\nWorld."
         intervals = _separator_intervals(text)
         assert intervals
-        starts, ends = zip(*intervals)
-        assert starts[0] <= text.index("\n")
-        assert any(text[start:end].find("<PAGE>") != -1 or "\n\n" in text[start:end] for start, end in intervals)
-        # overlapping/adjacent runs collapse to a single interval covering both markers
         blank_start = text.index("\n")
         page_end = text.index("World")
         covering = [span for span in intervals if span[0] <= blank_start and span[1] >= page_end]

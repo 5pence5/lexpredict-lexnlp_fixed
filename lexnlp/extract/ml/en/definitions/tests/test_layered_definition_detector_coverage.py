@@ -265,3 +265,37 @@ class TestTrainOnDoccanoAndFormattedData(TestCase):
             self.assertEqual(set(packed.namelist()), {"term.pickle", "definition.pickle"})
         _settings, captured_terms, _path, _compress = detector.model_term.train_calls[0]
         assert_frame_equal(captured_terms.reset_index(drop=True), term_frame.reset_index(drop=True))
+
+    def test_zip_succeeds_even_if_temp_cleanup_raises(self) -> None:
+        import shutil
+        import tempfile
+        from unittest.mock import patch
+
+        folder = Path(tempfile.mkdtemp())
+        save_path = folder / "out.zip"
+        detector = LayeredDefinitionDetector()
+        detector.model_term = _FixedSpanDetector([])
+        detector.model_definition = _FixedSpanDetector([])
+        definition_frame = pandas.DataFrame(
+            [["hello", [(0, 5)], [1, 1, 1, 1, 1]]],
+            columns=["sentence", "labels", "feature_mask"],
+        )
+        term_frame = pandas.DataFrame([["hello", [(1, 4)]]], columns=["sentence", "labels"])
+        real_rmtree = shutil.rmtree
+        calls = {"n": 0}
+
+        def flaky_rmtree(path, *args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                raise OSError("busy")
+            return real_rmtree(path, *args, **kwargs)
+
+        with patch(
+            "lexnlp.extract.ml.en.definitions.layered_definition_detector.shutil.rmtree",
+            flaky_rmtree,
+        ):
+            detector.train_on_formatted_data(definition_frame, term_frame, str(save_path))
+        self.assertTrue(save_path.is_file())
+        with ZipFile(save_path) as packed:
+            self.assertEqual(set(packed.namelist()), {"term.pickle", "definition.pickle"})
+        self.assertGreaterEqual(calls["n"], 2)

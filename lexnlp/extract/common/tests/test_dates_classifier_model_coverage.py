@@ -41,9 +41,7 @@ class TestBuildDateModel:
         from lexnlp.extract.common import dates_classifier_model as model_mod
 
         real_forest = sklearn.ensemble.RandomForestClassifier
-        monkeypatch.setattr(
-            sklearn.ensemble, "RandomForestClassifier", partial(real_forest, n_estimators=10)
-        )
+        monkeypatch.setattr(sklearn.ensemble, "RandomForestClassifier", partial(real_forest, n_estimators=10))
         monkeypatch.setattr(model_mod.sklearn.ensemble, "RandomForestClassifier", partial(real_forest, n_estimators=10))
 
         output_file = tmp_path / "date_model.joblib"
