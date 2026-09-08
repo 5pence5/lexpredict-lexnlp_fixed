@@ -1,0 +1,25 @@
+# A repo-level file overrides any organisation default, so the uv ecosystem is
+# declared here as well as github-actions. Dropping it would stop the grouped
+# uv updates this repository already receives (see PR #26, branch
+# dependabot/uv/uv-*, labels "dependencies" and "python:uv").
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      uv:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+      - "python:uv"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - github-actions
