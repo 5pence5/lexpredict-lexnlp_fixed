@@ -39,31 +39,37 @@ classifiers = [
   "Programming Language :: Python :: 3.14"
 ]
 dependencies = [
-  "beautifulsoup4>=4.12",
-  "cloudpickle>=3.0",
-  "dateparser>=1.2",
-  "elasticsearch>=8.15",
-  "gensim>=4.3.3",
-  "joblib>=1.4",
-  "lxml>=5.3",
-  "nltk>=3.9",
-  "num2words>=0.5.13",
+  "beautifulsoup4>=4.12,<5",
+  "cloudpickle>=3.0,<4",
+  "dateparser>=1.2,<2",
+  "elasticsearch>=8.17,<10",
+  "gensim>=4.3.3,<5",
+  "joblib>=1.5,<2",
+  "lxml>=5.3,<7",
+  "nltk>=3.9,<4",
+  "num2words>=0.5.13,<1",
   "numpy>=2.3,<3",
   "pandas>=2.2.0,<3",
-  "psutil>=6",
-  "pycountry>=23",
-  "python-dateutil>=2.9",
+  "psutil>=6,<8",
+  "pycountry>=24.6.1,<27",
+  "python-dateutil>=2.9,<3",
   "regex>=2024.0",
-  "reporters-db>=3.2.61",
-  "requests>=2.32",
-  "scikit-learn>=1.5",
-  "scipy>=1.11.0",
-  "skops>=0.11",
-  "tqdm>=4.67",
-  "Unidecode>=1.4",
-  "us>=2.0.2",
-  "zahlwort2num>=0.4.3"
+  "reporters-db>=3.2.61,<4",
+  "requests>=2.32,<3",
+  "scikit-learn>=1.5,<2",
+  "scipy>=1.13,<2",
+  "skops>=0.11,<1",
+  "tqdm>=4.67,<5",
+  "Unidecode>=1.4,<2",
+  "us>=2.0.2,<4",
+  "zahlwort2num>=0.4.3,<1"
 ]
+
+[project.urls]
+Homepage = "https://github.com/LexPredict/lexpredict-lexnlp"
+Documentation = "https://lexpredict-lexnlp.readthedocs.io/"
+Repository = "https://github.com/LexPredict/lexpredict-lexnlp"
+Issues = "https://github.com/LexPredict/lexpredict-lexnlp/issues"
 
 [project.optional-dependencies]
 test = [
