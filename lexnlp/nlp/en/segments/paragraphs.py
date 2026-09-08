@@ -61,9 +61,15 @@ def build_paragraph_break_features(
     if line_id < line_window_pre:
         line_window_pre = line_id
 
-    # Check final offset
-    if (line_id + line_window_post) >= len(lines):
-        line_window_post = len(lines) - line_window_post - 1
+    # Check final offset. This clamps the forward window to the number of
+    # lines that actually follow ``line_id``. It previously subtracted
+    # ``line_window_post`` instead of ``line_id``, which is unrelated to how
+    # much room is left: for a short document it came out too small and
+    # silently dropped features for lines that do exist (10 lines, line 2,
+    # window 9 gave 0 instead of 7), and for a line near the end it came out
+    # too large, leaving the loop to swallow IndexError for every step past
+    # the end.
+    line_window_post = min(line_window_post, len(lines) - line_id - 1)
 
     # Iterate through window
     for i in range(-line_window_pre, line_window_post + 1):
@@ -122,9 +128,13 @@ def get_paragraph_break_feature_names(
     if lines_count - 1 < line_window_pre:
         line_window_pre = lines_count - 1
 
-    # Check final offset
-    if line_window_post >= lines_count:
-        line_window_post = lines_count - line_window_post - 1
+    # Check final offset. These names are the union over every line, so the
+    # widest forward window any line can have is ``lines_count - 1``, reached
+    # at line 0. Subtracting ``line_window_post`` instead went negative as soon
+    # as the window reached the document length (10 lines, window 10 gave -1),
+    # which dropped even the zero-offset names from the column set while
+    # get_paragraph_break_features still produced them.
+    line_window_post = min(line_window_post, lines_count - 1)
 
     # Iterate through window
     for i in range(-line_window_pre, line_window_post + 1):
