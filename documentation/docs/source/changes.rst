@@ -74,6 +74,24 @@ Fixed
   method raised on every call and could never return a model.
 * The test suite no longer writes debug output into the tracked ``test_data``
   tree, which left the working copy dirty after every run.
+* Portuguese was unreachable through the locale dispatchers.  ``lexnlp.extract.pt``
+  ships native money, percent, amount, duration and citation extractors, but the
+  matching ``all_locales`` dispatchers registered only ``en`` and ``de``, so
+  ``"pt"`` and ``"pt-BR"`` fell through to the English routine.  Brazilian reais
+  were reported as US dollars -- ``R$ 1.500.000,00`` came back with currency
+  ``USD`` -- and Portuguese durations were not extracted at all.  The
+  dispatchers now resolve the effective language before branching on calling
+  convention, so an unregistered locale can no longer take a branch that does
+  not match the routine it selected.
+* Courts whose name began with the dictionary keyword were silently discarded.
+  ``UniversalCourtsParser`` guarded on the keyword with
+  ``pattern.search(text, re.IGNORECASE)``, but the second positional parameter
+  of ``re.Pattern.search`` is ``pos``, not ``flags``.  ``re.IGNORECASE`` is
+  ``2``, so every scan started at offset 2.  Spanish court extraction was
+  effectively dead -- all 17 entries in ``es_courts.csv`` begin with
+  ``Tribunal`` -- and Portuguese lost ``Tribunal Superior do Trabalho`` while
+  ``Supremo Tribunal Federal`` kept working.  Affected ``de``, ``en``, ``es``
+  and ``pt`` alike.
 
 Infrastructure
 ~~~~~~~~~~~~~~
@@ -97,6 +115,19 @@ Infrastructure
   exists, with ``.readthedocs.yaml``.
 * A ``dependabot.yml`` covering both the ``uv`` and ``github-actions``
   ecosystems.
+* ``documentation/PR31_AUDIT.md`` records a measured regression audit of this
+  branch against ``master``: a differential probe over 307 public extraction
+  callables and a 32-text multilingual corpus, plus a full public-symbol diff
+  across all 247 modules.  No feature was lost and no behaviour regressed; the
+  only difference from ``master`` is the Portuguese ratio repair.  It also
+  corrects an earlier artifact claim of "30 pickle, 0 skops": the real figure
+  is 10 skops -- every bundled scikit-learn model -- and 20 pickles that hold
+  pure lookup data with no class or reduction opcodes in them.
+* ``documentation/LANGUAGE_PARITY_EN_ES_PT.md`` compares English, Spanish and
+  Brazilian Portuguese capability by capability, with detection rates measured
+  against ``faker``'s locale identifier shapes, and sets out a tiered route to
+  parity.  Portuguese now reaches 15 working capabilities against English's 16;
+  Spanish reaches 6.
 
 Known limitations
 ~~~~~~~~~~~~~~~~~
@@ -110,6 +141,25 @@ Known limitations
 * The clause and list patterns in the new hierarchy recognise ``1.``, ``1.2``,
   ``A.1``, ``(a)``, ``(i)``, ``1)`` and bullets, but not bare ``a.`` / ``i.``
   or ``Article I``, so outlines using those markers are not detected.
+* Spanish remains substantially behind English and Portuguese.  Nine
+  extractors have no Spanish implementation at all (money, percents, amounts,
+  durations, distances, ratios, citations, trademarks, urls), the Spanish court
+  dictionary holds only the 17 Tribunales Superiores de Justicia and omits the
+  Tribunal Supremo, the Tribunal Constitucional and the Audiencia Nacional, and
+  ``EsLanguageTokens.conjunctions`` still contains the German ``und`` and
+  ``oder``.  That last one is deliberately left alone: ``es/courts.py`` unions
+  the conjunction list into a character-wise ``line_breaks`` set, where the
+  German words are inert only because they are multi-character, so substituting
+  the real single-letter Spanish conjunctions without also removing that union
+  would shatter every court name containing an ``e``.
+* ``pt/pii.py`` covers only email addresses and telephone numbers.  CPF and
+  CNPJ are recognised, at 60/60 against generated samples, but only through
+  ``pt/identifiers.py``, so a caller asking a Portuguese document for its PII
+  receives no national identifiers.  English does not behave this way.
+* Portuguese ratio extraction still matches inside Brazilian identifiers, so
+  ``CNPJ 12.345.678/0001-95`` yields a spurious ratio.  Court lookup in both
+  Spanish and Portuguese is accent-sensitive, so OCR output that has lost a
+  cedilla does not match.
 
 2.3.0 - November 30, 2022
 -------------------------
