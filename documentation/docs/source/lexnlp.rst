@@ -14,4 +14,4 @@ LexNLP package
 
     modules/extract/extract
     modules/nlp/nlp
-
+    modules/api/index

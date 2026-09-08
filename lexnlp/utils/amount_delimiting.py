@@ -137,8 +137,10 @@ def infer_delimiters(
 
     Returns:
         A dictionary with two keys:
+
         - decimal_delimiter
         - group_delimiter
+
         The respective values can either be a character (the delimiter)
         or `None` for when the delimiter could not be inferred.
 

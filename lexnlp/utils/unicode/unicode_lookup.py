@@ -40,6 +40,7 @@ def build_lookup_tables(
     Build and save Unicode character lookup tables derived from UnicodeData.txt.
 
     Reads UnicodeData.txt (from `table_source` or the default Unicode FTP URL), extracts character groupings and category mappings, and writes three pickle files containing:
+
     - a mapping of category group names to lists of characters,
     - a mapping from each character to its full general category,
     - a mapping from each character to its top-level category letter.

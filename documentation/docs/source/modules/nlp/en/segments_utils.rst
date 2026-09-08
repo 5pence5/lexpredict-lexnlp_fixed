@@ -1,8 +1,8 @@
 .. _nlp_en_segments_utils:
 
-============
+=============================================================
 :mod:`lexnlp.nlp.en.segments.utils`: Utilities for segmenting
-============
+=============================================================
 
 The :mod:`lexnlp.nlp.en.segments.utils` module contains utility methods for
 segmenting text.
@@ -17,6 +17,5 @@ segmenting text.
     - GitHub issues: https://github.com/LexPredict/lexpredict-lexnlp
     - Email: support@contraxsuite.com
 
-.. automodapi:: lexnlp.nlp.en.segments.utils
-    :include-all-objects:
+.. automodule:: lexnlp.nlp.en.segments.utils
     :members:
