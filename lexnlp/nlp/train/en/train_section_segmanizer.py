@@ -641,7 +641,10 @@ class SectionSegmentizerTrainManager:
 
     def train_logistic_regression(self):
         # Build model
-        model_log = sklearn.linear_model.LogisticRegression(penalty="l1", C=10.0, solver="lbfgs")
+        # lbfgs supports only the l2 penalty, so asking it for l1 raised
+        # ValueError on every call and this method could never return a model.
+        # saga is the solver that supports l1.
+        model_log = sklearn.linear_model.LogisticRegression(penalty="l1", C=10.0, solver="saga")
         model_log.fit(self.feature_df, self.target_data)
 
         # Assess model

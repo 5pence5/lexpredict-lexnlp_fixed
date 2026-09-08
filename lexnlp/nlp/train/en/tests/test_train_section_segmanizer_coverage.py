@@ -69,12 +69,18 @@ class TestBuildFeatures:
 
 
 class TestTrainHelpers:
-    def test_train_logistic_regression_rejects_l1_with_lbfgs(self) -> None:
+    def test_train_logistic_regression_returns_a_fitted_model(self) -> None:
+        """This used to raise: it asked lbfgs for an l1 penalty, which lbfgs
+        does not support, so the method could never return a model."""
         manager = SectionSegmentizerTrainManager()
         manager.feature_df = _tiny_frame()
         manager.target_data = [0, 1, 0, 1]
-        with pytest.raises(ValueError, match="lbfgs"):
-            manager.train_logistic_regression()
+
+        model = manager.train_logistic_regression()
+
+        assert model.penalty == "l1"
+        assert model.solver == "saga"
+        assert list(model.predict(manager.feature_df)) == [0, 1, 0, 1]
 
     def test_train_extra_trees_classifier(self) -> None:
         manager = SectionSegmentizerTrainManager()

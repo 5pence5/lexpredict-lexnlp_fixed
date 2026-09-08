@@ -263,6 +263,31 @@ implicit-optional = "error"
 # tail of Generator[T] annotations to Iterator[T].
 invalid-type-form = "warn"
 
+[tool.coverage.run]
+# The measured surface is the shipped source, not the tests that exercise it.
+source = ["lexnlp", "scripts", "ci"]
+omit = [
+  "*/tests/*",
+  "*/test_*.py",
+]
+
+[tool.coverage.report]
+# The suite covers every reachable statement. Anything that drops below this is
+# a gap someone introduced, not a target to negotiate down.
+fail_under = 100
+show_missing = true
+skip_covered = true
+exclude_also = [
+  # Never executed on import, and covering it means running the file as a
+  # script under a runpy harness, which tests the harness rather than the code.
+  'if __name__ == "__main__":',
+  # Evaluated by type checkers only.
+  "if TYPE_CHECKING:",
+  # Abstract declarations have no body to exercise.
+  "raise NotImplementedError",
+  "@(abc\\.)?abstractmethod",
+]
+
 [tool.pytest.ini_options]
 markers = [
   "serial: sequential-only tests",
