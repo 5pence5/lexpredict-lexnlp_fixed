@@ -397,9 +397,13 @@ class _SpanNode:
 
 
 _NEWLINE_AT_END_RE = re.compile(r"(?:\r\n|\n\r|\r|\n)$")
-_BLANK_LINE_RE = re.compile(r"(?:(?:[ \t]*)(?:\r\n|\n\r|\r(?!\n)|\n(?!\r))){2,}")
+# The filler between two line breaks is *any* non-linebreak whitespace, not just
+# ASCII space/tab: legal text extracted from HTML spells a blank line \n\xa0\n
+# (the browser's &nbsp;). ``[^\S\r\n]`` must exclude \r and \n, or the run would
+# swallow the very line breaks it is counting.
+_BLANK_LINE_RE = re.compile(r"(?:(?:[^\S\r\n]*)(?:\r\n|\n\r|\r(?!\n)|\n(?!\r))){2,}")
 _PAGE_MARKER_RE = re.compile(
-    r"^[ \t]*(?:<PAGE>(?:[ \t]+\d+)?|PAGE[ \t]+\d+(?:[ \t]+OF[ \t]+\d+)?)[ \t]*(?:\r\n|\n\r|\r|\n|$)",
+    r"^[^\S\r\n]*(?:<PAGE>(?:[^\S\r\n]+\d+)?|PAGE[^\S\r\n]+\d+(?:[^\S\r\n]+OF[^\S\r\n]+\d+)?)[^\S\r\n]*(?:\r\n|\n\r|\r|\n|$)",
     re.IGNORECASE | re.MULTILINE,
 )
 _EXPLICIT_HEADING_RE = re.compile(

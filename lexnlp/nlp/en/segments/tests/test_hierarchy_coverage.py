@@ -17,6 +17,7 @@ from lexnlp.nlp.en.segments.hierarchy import (
     StructureProfile,
     _attributes,
     _callable_id,
+    _default_paragraph_spans,
     _delimited_blocks,
     _digest_value,
     _enum,
@@ -463,3 +464,51 @@ class TestOutlineBackToBackSections:
         assert spans[1].attributes == (("heading_end", "29"),)
         assert text[spans[0].start : spans[0].end].startswith("(a)")
         assert text[spans[1].start : spans[1].end].startswith("(b)")
+
+
+class TestNonAsciiBlankLineSeparators:
+    r"""Real legal text arrives from HTML, where the blank line between two
+    paragraphs is spelled ``\n\xa0\n`` -- the browser's ``&nbsp;`` -- and not
+    ``\n\n``. A separator whose filler class is ``[ \t]`` sees no blank line
+    there and glues the two paragraphs into a single segment.
+    """
+
+    NBSP_BREAK = "First paragraph.\n\xa0\nSecond paragraph."
+
+    def test_nbsp_only_blank_line_is_a_separator(self) -> None:
+        text = self.NBSP_BREAK
+        assert _separator_intervals(text) == ((text.index("\n"), text.index("Second")),)
+
+    def test_nbsp_blank_line_splits_paragraphs(self) -> None:
+        bodies = [body for _, _, body in _default_paragraph_spans(self.NBSP_BREAK)]
+        assert bodies == ["First paragraph.", "Second paragraph."]
+
+    @pytest.mark.parametrize(
+        "filler",
+        ["\xa0", " ", " ", " ", "　", "\x0c", " \xa0\t"],
+        ids=["nbsp", "figure", "narrow-nbsp", "em", "ideographic", "form-feed", "mixed"],
+    )
+    def test_every_non_linebreak_whitespace_filler_separates(self, filler: str) -> None:
+        text = f"Alpha.\n{filler}\nBeta."
+        assert [body for _, _, body in _default_paragraph_spans(text)] == ["Alpha.", "Beta."]
+
+    def test_linebreaks_are_not_filler(self) -> None:
+        r"""The filler class must still exclude \r and \n. Were it plain ``\s``,
+        the run would swallow the newlines it is counting and a single line
+        break would separate paragraphs."""
+        assert _separator_intervals("Alpha.\nBeta.") == ()
+        assert [body for _, _, body in _default_paragraph_spans("Alpha.\nBeta.")] == ["Alpha.\nBeta."]
+
+    def test_page_marker_indented_with_nbsp_is_a_separator(self) -> None:
+        text = "Alpha.\n\xa0<PAGE>\xa0\nBeta."
+        # The page marker is anchored to the start of its own line, so the
+        # interval runs from just past the preceding break to the next body.
+        assert _separator_intervals(text) == ((text.index("\n") + 1, text.index("Beta")),)
+
+    def test_nbsp_separated_paragraphs_become_distinct_segments(self) -> None:
+        text = self.NBSP_BREAK
+        bodies = [
+            text[segment.start : segment.end].strip()
+            for segment in iter_document_segments(text, kind=SegmentKind.PARAGRAPH)
+        ]
+        assert bodies == ["First paragraph.", "Second paragraph."]
