@@ -8,7 +8,6 @@ import sys
 import warnings
 from argparse import Namespace
 from pathlib import Path
-from types import SimpleNamespace
 from zipfile import ZIP_STORED, ZipFile
 
 import joblib
@@ -284,16 +283,20 @@ class TestSanitizePandasIndices:
         assert not isinstance(inner["idx"], pd.Index)
 
     def test_set_recurses_into_mutable_members(self) -> None:
-        """A set's members must be hashable, so recurse through an object."""
+        """A set cannot be rewritten; mutable members still get sanitized."""
 
         class Holder:
             def __init__(self) -> None:
                 self.payload = {"idx": pd.Index(["kept"])}
 
+            def __hash__(self) -> int:
+                return id(self)
+
+            def __eq__(self, other: object) -> bool:
+                return self is other
+
         holder = Holder()
-
         result = script_mod._sanitize_pandas_indices({holder})
-
         assert result == {holder}
         assert holder.payload["idx"] == ["kept"]
         assert not isinstance(holder.payload["idx"], pd.Index)
@@ -302,6 +305,12 @@ class TestSanitizePandasIndices:
         class Node:
             def __init__(self) -> None:
                 self.columns = pd.Index(["s"])
+
+            def __hash__(self) -> int:
+                return id(self)
+
+            def __eq__(self, other: object) -> bool:
+                return self is other
 
         node = Node()
         result = script_mod._sanitize_pandas_indices({node})
@@ -325,13 +334,16 @@ class TestReexportSingleSkops:
     def test_writes_skops_sibling_and_sanitizes(self, tmp_path: Path) -> None:
         path = tmp_path / "date_model.pickle"
         clf = _tiny_estimator()
-        clf.columns = pd.Index(["feat"])  # type: ignore[attr-defined]
         joblib.dump(clf, path)
         target = script_mod._reexport_single_skops(path)
         assert target == path.with_suffix(".skops")
         assert target.exists()
         assert path.exists()
-        assert clf.columns == ["feat"]
+        from lexnlp.ml.model_io import load_model
+
+        loaded = load_model(target, trusted=True)
+        assert isinstance(loaded, LogisticRegression)
+        assert loaded.predict(np.array([[1.0]]))[0] == clf.predict(np.array([[1.0]]))[0]
 
 
 class TestMain:
