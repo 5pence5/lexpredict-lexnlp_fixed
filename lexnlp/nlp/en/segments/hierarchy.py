@@ -401,9 +401,16 @@ _NEWLINE_AT_END_RE = re.compile(r"(?:\r\n|\n\r|\r|\n)$")
 # ASCII space/tab: legal text extracted from HTML spells a blank line \n\xa0\n
 # (the browser's &nbsp;). ``[^\S\r\n]`` must exclude \r and \n, or the run would
 # swallow the very line breaks it is counting.
-_BLANK_LINE_RE = re.compile(r"(?:(?:[^\S\r\n]*)(?:\r\n|\n\r|\r(?!\n)|\n(?!\r))){2,}")
+#
+# The lookbehind and the possessive star keep the scan linear. Without them the
+# engine restarts inside a whitespace run at every offset and rescans the rest
+# of it, which is O(n^2) -- 275s on 160k of mixed whitespace, and reachable on
+# real input because HTML legal text carries long &nbsp; indents. Refusing to
+# start anywhere but the first character of a run costs nothing: a match that
+# began mid-run is never the leftmost one, so finditer would never return it.
+_BLANK_LINE_RE = re.compile(r"(?<![^\S\r\n])(?:[^\S\r\n]*+(?:\r\n|\n\r|\r(?!\n)|\n(?!\r))){2,}")
 _PAGE_MARKER_RE = re.compile(
-    r"^[^\S\r\n]*(?:<PAGE>(?:[^\S\r\n]+\d+)?|PAGE[^\S\r\n]+\d+(?:[^\S\r\n]+OF[^\S\r\n]+\d+)?)[^\S\r\n]*(?:\r\n|\n\r|\r|\n|$)",
+    r"^[^\S\r\n]*+(?:<PAGE>(?:[^\S\r\n]++\d+)?|PAGE[^\S\r\n]++\d+(?:[^\S\r\n]++OF[^\S\r\n]++\d+)?)[^\S\r\n]*+(?:\r\n|\n\r|\r|\n|$)",
     re.IGNORECASE | re.MULTILINE,
 )
 _EXPLICIT_HEADING_RE = re.compile(

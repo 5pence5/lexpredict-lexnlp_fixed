@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import time
 
 import pytest
 
@@ -512,3 +513,29 @@ class TestNonAsciiBlankLineSeparators:
             for segment in iter_document_segments(text, kind=SegmentKind.PARAGRAPH)
         ]
         assert bodies == ["First paragraph.", "Second paragraph."]
+
+
+class TestSeparatorScanIsLinear:
+    r"""Widening the filler class to all non-linebreak whitespace made a latent
+    quadratic reachable. ``(?:[^\S\r\n]*LB){2,}`` restarts inside a whitespace
+    run at every offset, and each attempt rescans the rest of the run, so a
+    long ``\xa0`` indent with no line break costs O(n^2). HTML-derived legal
+    text is full of long ``&nbsp;`` runs, so this is reachable on real input,
+    not just crafted input. A lookbehind keeps the scan from starting anywhere
+    but the first character of a run.
+    """
+
+    BUDGET_SECONDS = 5.0
+
+    @pytest.mark.parametrize(
+        "filler",
+        ["\xa0", " ", "\xa0 \t"],
+        ids=["nbsp", "space", "mixed"],
+    )
+    def test_long_whitespace_run_without_a_linebreak_stays_fast(self, filler: str) -> None:
+        text = filler * (40_000 // len(filler))
+        start = time.perf_counter()
+        intervals = _separator_intervals(text)
+        elapsed = time.perf_counter() - start
+        assert intervals == ()
+        assert elapsed < self.BUDGET_SECONDS, f"{elapsed:.1f}s scanning {len(text)} whitespace chars"
