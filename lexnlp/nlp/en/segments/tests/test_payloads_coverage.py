@@ -50,23 +50,17 @@ class TestGuards:
     def test_blank_tokenizer_id_rejected(self) -> None:
         chunk = _chunk()
         with pytest.raises(ValueError, match="tokenizer_id must be a non-empty string"):
-            render_embedding_payload(
-                chunk, token_counter=len, tokenizer_id="  ", max_tokens=100
-            )
+            render_embedding_payload(chunk, token_counter=len, tokenizer_id="  ", max_tokens=100)
 
     def test_non_positive_max_tokens_rejected(self) -> None:
         chunk = _chunk()
         with pytest.raises(ValueError, match="max_tokens must be a positive integer"):
-            render_embedding_payload(
-                chunk, token_counter=len, tokenizer_id="tests.tok.v1", max_tokens=0
-            )
+            render_embedding_payload(chunk, token_counter=len, tokenizer_id="tests.tok.v1", max_tokens=0)
 
     def test_bool_max_tokens_rejected(self) -> None:
         chunk = _chunk()
         with pytest.raises(ValueError, match="max_tokens must be a positive integer"):
-            render_embedding_payload(
-                chunk, token_counter=len, tokenizer_id="tests.tok.v1", max_tokens=True
-            )
+            render_embedding_payload(chunk, token_counter=len, tokenizer_id="tests.tok.v1", max_tokens=True)
 
 
 class TestEmbeddingPayloadValidation:
@@ -74,7 +68,7 @@ class TestEmbeddingPayloadValidation:
         payload = _valid_payload()
         with pytest.raises(ValueError, match="serialization_version must be"):
             dataclasses.replace(payload, serialization_version="bogus.v9")
-        assert EMBEDDING_PAYLOAD_SERIALIZATION_VERSION == payload.serialization_version
+        assert payload.serialization_version == EMBEDDING_PAYLOAD_SERIALIZATION_VERSION
 
     def test_negative_token_count_rejected(self) -> None:
         payload = _valid_payload()
@@ -109,9 +103,7 @@ class TestEmbeddingPayloadValidation:
     def test_text_must_match_serialization(self) -> None:
         payload = _valid_payload()
         with pytest.raises(ValueError, match="versioned payload serialization"):
-            dataclasses.replace(
-                payload, text="something else entirely", text_sha256="a" * 64
-            )
+            dataclasses.replace(payload, text="something else entirely", text_sha256="a" * 64)
 
     def test_sha_must_match_exact_text(self) -> None:
         payload = _valid_payload()
@@ -132,13 +124,19 @@ class TestRenderGuards:
     def test_non_chunk_rejected(self) -> None:
         with pytest.raises(TypeError, match="chunk must be a DocumentChunk"):
             render_embedding_payload(
-                "nope", token_counter=len, tokenizer_id="t", max_tokens=10  # type: ignore[arg-type]
+                "nope",
+                token_counter=len,
+                tokenizer_id="t",
+                max_tokens=10,  # type: ignore[arg-type]
             )
 
     def test_non_callable_counter_rejected(self) -> None:
         with pytest.raises(TypeError, match="token_counter must be callable"):
             render_embedding_payload(
-                _chunk(), token_counter="len", tokenizer_id="t", max_tokens=100  # type: ignore[arg-type]
+                _chunk(),
+                token_counter="len",
+                tokenizer_id="t",
+                max_tokens=100,  # type: ignore[arg-type]
             )
 
     def test_non_bool_ancestry_flag_rejected(self) -> None:
@@ -164,11 +162,7 @@ class TestRenderGuards:
 
     def test_heading_owned_by_paragraph_rejected(self) -> None:
         chunk = _chunk()
-        paragraph = next(
-            ref
-            for ref in chunk.content_provenance.segments
-            if ref.kind is SegmentKind.PARAGRAPH
-        )
+        paragraph = next(ref for ref in chunk.content_provenance.segments if ref.kind is SegmentKind.PARAGRAPH)
         fragment = ContextFragment("heading", "Header", paragraph.segment_id)
         with pytest.raises(ValueError, match="heading context must be owned"):
             render_embedding_payload(
@@ -200,16 +194,12 @@ class TestRenderGuards:
 
     def test_counter_negative_result_rejected(self) -> None:
         with pytest.raises(ValueError, match="token_counter cannot return a negative value"):
-            render_embedding_payload(
-                _chunk(), token_counter=lambda text: -1, tokenizer_id="t", max_tokens=100
-            )
+            render_embedding_payload(_chunk(), token_counter=lambda text: -1, tokenizer_id="t", max_tokens=100)
 
     def test_budget_overflow_raises_with_evidence(self) -> None:
         chunk = _chunk()
         with pytest.raises(PayloadBudgetExceeded) as caught:
-            render_embedding_payload(
-                chunk, token_counter=len, tokenizer_id="t", max_tokens=1
-            )
+            render_embedding_payload(chunk, token_counter=len, tokenizer_id="t", max_tokens=1)
         assert caught.value.actual == len(chunk.text)
         assert caught.value.maximum == 1
         assert caught.value.chunk_id == chunk.chunk_id
