@@ -172,35 +172,48 @@ change.
 
 ## Tests and coverage
 
-The suite was failing on master before any of this work, and coverage was
-measured at 89%.
+The suite was failing on master before any of this work, and coverage was 89%.
 
 | | Before | After |
 | --- | --- | --- |
-| Tests passing | 1,798 | 3,765 |
+| Tests passing | 1,798 | 3,871 |
 | Tests failing | 6 | 0 |
-| Source coverage | 89.0% | 99.79% |
-| Source modules at 100% | not measured | 249 of 264 |
-| Uncovered source statements | 3,359 | 33 |
+| Statement coverage | 89.0% | 100.00% |
+| Uncovered statements | 3,359 | 0 |
 | Documentation build warnings | 181 | 0, and `-W` passes |
 | Known dependency vulnerabilities | 38 | 0, one ignored with a recorded reason |
 
-Coverage tests were written by muse and grok, dispatched in two rounds: 42
-batches over the 168 modules that had uncovered lines, then 8 more over the 31
-that were still short, most of them code added after the first round ran. Each
-agent received the exact line numbers its suite was not reaching. Every
-generated test was run before being committed, and the ones that failed or were
-vacuous were rewritten by hand.
+`fail_under = 100` is now configured, so the suite fails if coverage drops.
+The measured surface is `lexnlp`, `scripts` and `ci`, with test files omitted.
+`__main__` guards, `TYPE_CHECKING` blocks and abstract declarations are excluded
+by the conventional coverage settings.
 
-The 33 statements still uncovered are, with two exceptions, defensive code that
-cannot be reached without stubbing the unit under test: invariant guards that
-raise when the chunk planner fails to make progress or the hierarchy does not
-reconstruct its source byte for byte, and `continue` arms the agents proved
-dead by argument, by exhausting a translation map, and in one case by a
-200,000-sentence fuzz. The two exceptions are a script block that downloads
-from the Unicode FTP site and a model-training branch that needs a fitted
-estimator.
+Tests were written by muse and grok across four rounds: 42 batches over the 168
+modules that had gaps, 8 more over the 31 still short after that, 7 aimed at the
+last 33 statements one line at a time, and 2 on the CI tooling that the
+configuration newly brought into scope. Each agent was given the exact line
+numbers its suite was not reaching. Every generated test was run before being
+committed, and the ones that failed or asserted nothing were rewritten by hand.
 
-An early measurement reported 97%. That figure was wrong: a `.coverage` data
-file left behind by a run killed part-way had been merged into it. Deleting the
-stale file and re-measuring gives the numbers above.
+Reaching the last few statements turned up two more defects. The section
+segmenter's `train_logistic_regression` asked the lbfgs solver for an l1
+penalty, which lbfgs does not support, so it raised on every call and could
+never return a model; the four statements after the fit were unreachable for
+that reason. And `ci/skip_audit.py` and `ci/check_dist_contents.py`, both gates
+that decide whether a release proceeds, had 0% and 36% coverage.
+
+Twenty-one statements carry `# pragma: no cover`, each with its reason on the
+line above and each verified rather than asserted: `"&"` is in
+`string.punctuation` so the strip above always removes it; `finditer` yields
+distinct non-overlapping spans so a duplicate cannot appear;
+`str.splitlines(keepends=True)` round-trips, checked over adversarial input
+including lone surrogates and U+2028; the sentence splitter can never fullmatch
+a bare `"and"`, checked with a 200,000-case fuzz; a container-stack pop is dead,
+checked with a 400-case probe under `sys.settrace`. Eight are defensive
+fallbacks in the chunk planner, including a strict-progress invariant that
+raises if planning ever fails to advance. Those guards belong in the code and
+can only be reached by breaking the unit under test.
+
+An intermediate reading of 97% was wrong: a `.coverage` file left behind by a
+run killed part-way had been merged into it. Deleting the stale file and
+re-measuring gave the real figures.
