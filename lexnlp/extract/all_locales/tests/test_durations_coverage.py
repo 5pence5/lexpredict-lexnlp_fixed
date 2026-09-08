@@ -11,9 +11,10 @@ from decimal import Decimal
 
 from lexnlp.extract.all_locales import durations
 from lexnlp.extract.all_locales.durations import ROUTINE_BY_LOCALE, get_duration_annotations
-from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN
+from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN, LANG_PT
 from lexnlp.extract.de.durations import get_duration_annotations as get_duration_annotations_de
 from lexnlp.extract.en.durations import get_duration_annotations as get_duration_annotations_en
+from lexnlp.extract.pt.durations import get_duration_annotations as get_duration_annotations_pt
 
 EN_TEXT = "The term is 30 days after signing."
 DE_TEXT = "Die Frist beträgt 30 Tage nach Unterzeichnung."
@@ -26,9 +27,13 @@ def test_module_metadata():
 
 
 def test_routine_by_locale_mapping():
-    assert set(ROUTINE_BY_LOCALE) == {LANG_EN.code, LANG_DE.code}
+    # Portuguese joined the dispatcher: lexnlp.extract.pt ships a native
+    # routine, and routing pt through the English one reported Brazilian
+    # reais as USD.
+    assert set(ROUTINE_BY_LOCALE) == {LANG_EN.code, LANG_DE.code, LANG_PT.code}
     assert ROUTINE_BY_LOCALE["en"] is get_duration_annotations_en
     assert ROUTINE_BY_LOCALE["de"] is get_duration_annotations_de
+    assert ROUTINE_BY_LOCALE["pt"] is get_duration_annotations_pt
 
 
 def test_returns_generator():

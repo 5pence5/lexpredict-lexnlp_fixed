@@ -8,12 +8,17 @@ __email__ = "support@contraxsuite.com"
 
 from collections.abc import Generator
 
-from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN, Locale
+from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN, LANG_PT, Locale
 from lexnlp.extract.common.annotations.money_annotation import MoneyAnnotation
 from lexnlp.extract.de.money import get_money_annotations as get_money_annotations_de
 from lexnlp.extract.en.money import get_money_annotations as get_money_annotations_en
+from lexnlp.extract.pt.money import get_money_annotations as get_money_annotations_pt
 
-ROUTINE_BY_LOCALE = {LANG_EN.code: get_money_annotations_en, LANG_DE.code: get_money_annotations_de}
+ROUTINE_BY_LOCALE = {
+    LANG_EN.code: get_money_annotations_en,
+    LANG_DE.code: get_money_annotations_de,
+    LANG_PT.code: get_money_annotations_pt,
+}
 
 
 def get_money_annotations(

@@ -10,10 +10,11 @@ import collections.abc
 from decimal import Decimal
 
 from lexnlp.extract.all_locales import money
-from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN
+from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN, LANG_PT
 from lexnlp.extract.all_locales.money import ROUTINE_BY_LOCALE, get_money_annotations
 from lexnlp.extract.de.money import get_money_annotations as get_money_annotations_de
 from lexnlp.extract.en.money import get_money_annotations as get_money_annotations_en
+from lexnlp.extract.pt.money import get_money_annotations as get_money_annotations_pt
 
 EN_TEXT = "The fee is 1000.56789 dollars now."
 DE_TEXT = "Der Preis beträgt 1.000,50 Euro fällig jetzt."
@@ -25,9 +26,13 @@ def test_module_metadata():
 
 
 def test_routine_by_locale_mapping():
-    assert set(ROUTINE_BY_LOCALE) == {LANG_EN.code, LANG_DE.code}
+    # Portuguese joined the dispatcher: lexnlp.extract.pt ships a native
+    # routine, and routing pt through the English one reported Brazilian
+    # reais as USD.
+    assert set(ROUTINE_BY_LOCALE) == {LANG_EN.code, LANG_DE.code, LANG_PT.code}
     assert ROUTINE_BY_LOCALE["en"] is get_money_annotations_en
     assert ROUTINE_BY_LOCALE["de"] is get_money_annotations_de
+    assert ROUTINE_BY_LOCALE["pt"] is get_money_annotations_pt
 
 
 def test_returns_generator():

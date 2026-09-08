@@ -10,10 +10,11 @@ import collections.abc
 from decimal import Decimal
 
 from lexnlp.extract.all_locales import percents
-from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN
+from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN, LANG_PT
 from lexnlp.extract.all_locales.percents import ROUTINE_BY_LOCALE, get_percent_annotations
 from lexnlp.extract.de.percents import get_percent_annotations as get_percent_annotations_de
 from lexnlp.extract.en.percents import get_percent_annotations as get_percent_annotations_en
+from lexnlp.extract.pt.percents import get_percent_annotations as get_percent_annotations_pt
 
 EN_TEXT = "The rate is 5.56789% per annum."
 DE_TEXT = "Der Satz beträgt 5,5 % pro Jahr."
@@ -25,9 +26,13 @@ def test_module_metadata():
 
 
 def test_routine_by_locale_mapping():
-    assert set(ROUTINE_BY_LOCALE) == {LANG_EN.code, LANG_DE.code}
+    # Portuguese joined the dispatcher: lexnlp.extract.pt ships a native
+    # routine, and routing pt through the English one reported Brazilian
+    # reais as USD.
+    assert set(ROUTINE_BY_LOCALE) == {LANG_EN.code, LANG_DE.code, LANG_PT.code}
     assert ROUTINE_BY_LOCALE["en"] is get_percent_annotations_en
     assert ROUTINE_BY_LOCALE["de"] is get_percent_annotations_de
+    assert ROUTINE_BY_LOCALE["pt"] is get_percent_annotations_pt
 
 
 def test_returns_generator():

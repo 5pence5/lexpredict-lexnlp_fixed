@@ -10,9 +10,10 @@ import collections.abc
 
 from lexnlp.extract.all_locales import citations
 from lexnlp.extract.all_locales.citations import ROUTINE_BY_LOCALE, get_citation_annotations
-from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN
+from lexnlp.extract.all_locales.languages import DEFAULT_LANGUAGE, LANG_DE, LANG_EN, LANG_PT
 from lexnlp.extract.de.citations import get_citation_annotations as get_citation_annotations_de
 from lexnlp.extract.en.citations import get_citation_annotations as get_citation_annotations_en
+from lexnlp.extract.pt.citations import get_citation_annotations as get_citation_annotations_pt
 
 EN_TEXT = "See 410 U.S. 113 (1973) for details."
 DE_TEXT = "Artikel 2 Nr. 1 des Gesetzes vom 2. Januar 2002 (BGBl. I S. 2477)"
@@ -24,9 +25,13 @@ def test_module_metadata():
 
 
 def test_routine_by_locale_mapping():
-    assert set(ROUTINE_BY_LOCALE) == {LANG_EN.code, LANG_DE.code}
+    # Portuguese joined the dispatcher: lexnlp.extract.pt ships a native
+    # routine, and routing pt through the English one reported Brazilian
+    # reais as USD.
+    assert set(ROUTINE_BY_LOCALE) == {LANG_EN.code, LANG_DE.code, LANG_PT.code}
     assert ROUTINE_BY_LOCALE["en"] is get_citation_annotations_en
     assert ROUTINE_BY_LOCALE["de"] is get_citation_annotations_de
+    assert ROUTINE_BY_LOCALE["pt"] is get_citation_annotations_pt
 
 
 def test_returns_generator():
@@ -59,7 +64,8 @@ def test_german_locale_routes_to_german():
 
 def test_unknown_locale_falls_back_to_default_english():
     assert ROUTINE_BY_LOCALE[DEFAULT_LANGUAGE.code] is get_citation_annotations_en
-    for locale in ("fr-FR", "es-ES", "pt-PT"):
+    # pt-PT now has a native route, so it is no longer a fallback case.
+    for locale in ("fr-FR", "es-ES", "it-IT"):
         found = list(get_citation_annotations(locale, EN_TEXT))
         expected = list(get_citation_annotations_en(EN_TEXT))
         assert len(found) == 1
