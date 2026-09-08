@@ -39,15 +39,11 @@ BANNED_WHEEL_PREFIXES = (
     "scripts/",
 )
 
-REQUIRED_SEGMENTATION_SDIST_MEMBERS = (
-    "lexnlp/nlp/en/tests/segmentation_quality.py",
-    "scripts/segmentation_benchmark.py",
-    "scripts/segmentation_quality_gate.py",
-    "test_data/lexnlp/nlp/en/sota_segmentation/boundary_gold.json",
-    "test_data/lexnlp/nlp/en/sota_segmentation/legal_edge_cases.json",
-    "test_data/lexnlp/nlp/en/sota_segmentation/legacy_parity.json",
-    "test_data/lexnlp/nlp/en/sota_segmentation/retrieval_gold.json",
-)
+# The sdist ships the library, not the repository: uv_build exports the
+# ``lexnlp`` package and nothing under ``scripts/``, ``test_data/`` or any
+# ``tests/`` directory. The segmentation quality gate is repository tooling and
+# runs from a checkout in CI, so nothing about it is required in an artifact.
+REQUIRED_SEGMENTATION_SDIST_MEMBERS: tuple[str, ...] = ()
 
 # These are the resource types loaded from the installed lexnlp package at
 # runtime. Keeping this list central makes newly added resources (including the

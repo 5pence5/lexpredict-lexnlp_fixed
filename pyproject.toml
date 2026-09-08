@@ -4,7 +4,7 @@
 # owned by Astral (same vendor as ``uv`` and ``ruff``) so the toolchain
 # stays consistent.
 [build-system]
-requires = ["uv_build>=0.9.0,<0.10.0"]
+requires = ["uv_build>=0.9.0,<0.12.0"]
 build-backend = "uv_build"
 
 [project]
@@ -76,6 +76,9 @@ test = [
   "pytest>=8.3.0",
   "pytest-cov>=5.0.0",
   "pytest-xdist>=3.6.0",
+  # Exercises the pyarrow dtype-backend path in lexnlp.utils.pandas_config,
+  # which was otherwise skipped for want of the optional dependency.
+  "pyarrow>=17",
 ]
 dev = [
   "pytest>=8.3.0",

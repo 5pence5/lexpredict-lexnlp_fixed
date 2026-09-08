@@ -832,6 +832,7 @@ ner = [
     { name = "spacy" },
 ]
 test = [
+    { name = "pyarrow" },
     { name = "pytest" },
     { name = "pytest-cov" },
     { name = "pytest-xdist" },
@@ -882,6 +883,7 @@ requires-dist = [
     { name = "pip-audit", marker = "extra == 'audit'", specifier = ">=2.7" },
     { name = "psutil", specifier = ">=6,<8" },
     { name = "pyarrow", marker = "extra == 'arrow'", specifier = ">=17" },
+    { name = "pyarrow", marker = "extra == 'test'", specifier = ">=17" },
     { name = "pycountry", specifier = ">=24.6.1,<27" },
     { name = "pylint", marker = "extra == 'dev'", specifier = ">=3.3.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.3.0" },
