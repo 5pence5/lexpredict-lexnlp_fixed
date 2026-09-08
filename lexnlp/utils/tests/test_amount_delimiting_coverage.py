@@ -195,6 +195,36 @@ def test_infer_delimiters_indian_grouping_convention():
     assert result is not None
 
 
+class TestInferDelimitersTwoDelimiterFallback:
+    """Lines 222-225: fallback when the two-delimiter scan names no decimal.
+
+    With the real get_delimited_blocks the last block delimiter is always one
+    of the two delimiters, so both slots are always filled and line 220 always
+    returns. These tests force the defensive state (last-block delimiter
+    outside the delimiter set) by stubbing get_delimited_blocks.
+    """
+
+    def _infer_with_blocks(self, text, monkeypatch, blocks_ret):
+        ctx, conv = _mock_conventions(".", ",", [3, 3, 0])
+        monkeypatch.setattr(
+            "lexnlp.utils.amount_delimiting.get_delimited_blocks",
+            lambda _text: blocks_ret,
+        )
+        with ctx, conv:
+            return infer_delimiters(text, "en_US")
+
+    def test_grouping_failure_returns_none(self, monkeypatch):
+        blocks = [DelimitedBlock(length=2, delimiter=";")]
+        assert self._infer_with_blocks("1,000.50", monkeypatch, ({",", "."}, blocks)) is None
+
+    def test_grouping_pass_returns_empty_decimal(self, monkeypatch):
+        blocks = [DelimitedBlock(length=3, delimiter=";")]
+        result = self._infer_with_blocks("1,000.50", monkeypatch, ({",", "."}, blocks))
+        assert result is not None
+        assert result["decimal_delimiter"] == ""
+        assert result["group_delimiter"] in {",", "."}
+
+
 @pytest.mark.parametrize("bad", ["", "1,2", "x"])
 def test_get_delimited_blocks_parametrized_smoke(bad: str):
     if bad == "":

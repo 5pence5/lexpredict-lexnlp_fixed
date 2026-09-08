@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import pickle
+import runpy
 import subprocess
 import sys
 from pathlib import Path
@@ -479,3 +480,22 @@ class TestMain:
         assert rc == 1
         assert "legacy warning regression exceeds threshold (0 > -1)" in captured.out
         assert "candidate legacy warnings:" not in captured.out
+
+
+class TestMainGuard:
+    """Exercise the ``if __name__ == "__main__"`` guard (line 301)."""
+
+    def test_guard_identical_tags_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "reexport_contract_model.py",
+                "--source-tag",
+                "pipeline/same/1",
+                "--target-tag",
+                "pipeline/same/1",
+            ],
+        )
+        with pytest.raises(ValueError, match="must differ"):
+            runpy.run_path(str(Path(script_mod.__file__)), run_name="__main__")

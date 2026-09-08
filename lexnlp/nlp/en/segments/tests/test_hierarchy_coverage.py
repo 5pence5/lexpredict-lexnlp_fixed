@@ -21,6 +21,7 @@ from lexnlp.nlp.en.segments.hierarchy import (
     _digest_value,
     _enum,
     _integer,
+    _Line,
     _merge_augmented_span,
     _NumericCandidate,
     _ordinal,
@@ -434,3 +435,31 @@ class TestSpanResultPlainSegmentsAndCallableId:
         document = reconstructed[0]
         assert document.kind is SegmentKind.DOCUMENT
         assert document.reconstruct(text) == text
+
+
+class TestOutlineBackToBackSections:
+    def test_expired_section_popped_while_advancing(self) -> None:
+        # Both sections end before the first content line, so they are
+        # advanced in a single line iteration: the expired inner section must
+        # be popped before the surviving section becomes the outline parent.
+        text = "x" * 10 + "(a) alpha\n(b) beta!" + "z" * 3
+        assert len(text) == 32
+        lines = [
+            _Line(0, 10, 19, 20, text[10:19], text[10:19].strip()),
+            _Line(1, 20, 29, 32, text[20:29], text[20:29].strip()),
+        ]
+        assert lines[0].content == "(a) alpha"
+        assert lines[1].content == "(b) beta!"
+        sections = [
+            StructuralSpan(SegmentKind.SECTION, 0, 5, "A", 1, ()),
+            StructuralSpan(SegmentKind.SECTION, 6, 25, "B", 1, ()),
+        ]
+        spans = _outline_spans(text, lines, sections, set(), set())
+        assert [(span.kind, span.start, span.end, span.label, span.level) for span in spans] == [
+            (SegmentKind.LIST_ITEM, 10, 20, "(a)", 3),
+            (SegmentKind.LIST_ITEM, 20, 25, "(b)", 3),
+        ]
+        assert spans[0].attributes == (("heading_end", "19"),)
+        assert spans[1].attributes == (("heading_end", "29"),)
+        assert text[spans[0].start : spans[0].end].startswith("(a)")
+        assert text[spans[1].start : spans[1].end].startswith("(b)")

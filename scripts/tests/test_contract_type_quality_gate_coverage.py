@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import json
+import runpy
 import sys
 from pathlib import Path
 from typing import Any
@@ -416,3 +417,22 @@ class TestMain:
         assert gate.resolve_contract_type_model_tag() == "pipeline/contract-type/0.2-runtime"
         monkeypatch.setenv("LEXNLP_CONTRACT_TYPE_MODEL_TAG", "  custom/tag  ")
         assert gate.resolve_contract_type_model_tag() == "custom/tag"
+
+
+class TestMainGuard:
+    """Exercise the ``if __name__ == "__main__"`` guard (line 351)."""
+
+    def test_guard_rejects_non_positive_top_n(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "contract_type_quality_gate.py",
+                "--candidate-tag",
+                "pipeline/contract-type/0.2-runtime",
+                "--top-n",
+                "0",
+            ],
+        )
+        with pytest.raises(ValueError, match="--top-n must be > 0"):
+            runpy.run_path(str(Path(gate.__file__)), run_name="__main__")

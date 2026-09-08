@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import runpy
+import sys
 from pathlib import Path
 
 import pytest
@@ -222,3 +224,36 @@ class TestMainFilenameAndSize:
         rc = drift.main(["--manifest", str(manifest)])
         assert rc == 0
         assert "asset-drift: OK pipeline/x/0.1" in capsys.readouterr().out
+
+
+class TestMainGuard:
+    """Exercise the ``if __name__ == "__main__"`` guard (line 145)."""
+
+    def test_guard_missing_tag_exits_one(self, tmp_path, monkeypatch, capsys):
+        manifest = tmp_path / "manifest.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "assets": [
+                        {
+                            "tag": "pipeline/does-not-exist/0.0",
+                            "filename": "model.pkl",
+                            "sha256": "0" * 64,
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["asset_drift_check.py", "--manifest", str(manifest)],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            runpy.run_path(str(Path(drift.__file__)), run_name="__main__")
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "asset-drift: ERROR pipeline/does-not-exist/0.0" in captured.err
+        assert "missing/unreadable" in captured.err
+        assert "FileNotFoundError" in captured.err

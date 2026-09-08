@@ -44,3 +44,32 @@ def test_strict_mode_skips_bare_trigger_sentence() -> None:
 def test_strict_mode_keeps_trigger_with_context() -> None:
     relaxed = get_constraint_list("The value is within limits.", strict=True)
     assert relaxed == [("within", "the value is", "")]
+
+
+def test_comma_joined_prefix_combines_into_longer_phrase() -> None:
+    # "no,less than" cannot match "no less than" directly (comma instead of
+    # a space), so the regex matches short "less than" with pre "no"; the
+    # combined "no less than" is a known phrase and becomes the constraint.
+    assert get_constraint_list("no,less than 5 dollars are due") == [("no less than", "no", "")]
+    annotations = get_constraint_annotation_list("no,less than 5 dollars are due")
+    assert len(annotations) == 1
+    assert annotations[0].constraint == "no less than"
+    assert annotations[0].pre == "no"
+    assert annotations[0].post == ""
+    assert annotations[0].coords == (0, 13)
+
+
+def test_comma_joined_at_least_combines() -> None:
+    assert get_constraint_list("at,least five dollars") == [("at least", "at", "")]
+    annotations = get_constraint_annotation_list("at,least five dollars")
+    assert len(annotations) == 1
+    assert annotations[0].constraint == "at least"
+    assert annotations[0].pre == "at"
+    assert annotations[0].post == ""
+    assert annotations[0].coords == (0, 9)
+
+
+def test_uncombinable_prefix_keeps_short_match() -> None:
+    # pre + constraint is not a known phrase, so the short match is kept.
+    assert get_constraint_list("value no,less than five") == [("less than", "value no", "")]
+    assert get_constraint_list("pay at,least five dollars now") == [("least", "pay at", "")]

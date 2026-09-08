@@ -95,3 +95,14 @@ def test_read_csv_arrow_preserves_explicit_backend(
     monkeypatch.setattr(pd, "read_csv", spy_read_csv)
     assert read_csv_arrow(path, dtype_backend="numpy_nullable") is sentinel
     assert captured.get("dtype_backend") == "numpy_nullable"
+
+
+def test_convert_to_arrow_without_pyarrow_returns_frame_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Lines 63-64: the ImportError probe returns the frame untouched."""
+    monkeypatch.setitem(sys.modules, "pyarrow", None)
+    sentinel = object()
+    frame = _RecordingFrame(result=sentinel)
+    assert convert_to_arrow(frame) is frame  # type: ignore[arg-type]
+    assert frame.calls == []

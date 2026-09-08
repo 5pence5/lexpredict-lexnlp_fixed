@@ -70,3 +70,60 @@ class TestExtraDatesEndToEnd:
         ants = list(_parser().get_date_annotations("reunião em 15/02/20 com todos", strict=False))
         assert len(ants) == 1
         assert ants[0].date == datetime.datetime(2020, 2, 15)
+
+
+class TestLocalityDateDefensiveSkips:
+    """Lines 316-317 (int() failure) and 319 (unknown month) in get_extra_dates.
+
+    The real LOCALITY_DATE_RE only matches numeric day/year groups and month
+    aliases from _MONTH_NUMBER, so both guards are defensive: reaching them
+    requires patching the regex or the month table.
+    """
+
+    def _spy_on_build_date(self, monkeypatch) -> list:
+        calls: list = []
+        origin = PtDateParser._build_date
+
+        def spy(self, day, month, year):
+            calls.append((day, month, year))
+            return origin(self, day, month, year)
+
+        monkeypatch.setattr(PtDateParser, "_build_date", spy)
+        return calls
+
+    def test_locality_date_builds_expected_datetime(self, monkeypatch) -> None:
+        parser = PtDateParser("Brasília, 12 de março de 2024")
+        parser.dates = []
+        calls = self._spy_on_build_date(monkeypatch)
+        parser.get_extra_dates(strict=False)
+        assert calls == [(12, 3, 2024)]
+        assert parser.dates == [("12 de março de 2024", datetime.datetime(2024, 3, 12))]
+
+    def test_locality_unknown_month_skips_build(self, monkeypatch) -> None:
+        import lexnlp.extract.pt.dates as pt_dates
+
+        monkeypatch.setattr(pt_dates, "_MONTH_NUMBER", {})
+        parser = PtDateParser("Brasília, 12 de março de 2024")
+        parser.dates = []
+        calls = self._spy_on_build_date(monkeypatch)
+        parser.get_extra_dates(strict=False)
+        # Line 319 `continue`: the locality branch bailed out before _build_date.
+        assert calls == []
+        # The sequential-year branch still yields the date via dateparser.
+        assert parser.dates == [("12 de março de 2024", datetime.datetime(2024, 3, 12))]
+
+    def test_locality_unparsable_ints_skipped(self, monkeypatch) -> None:
+        import re as stdlib_re
+
+        fake_re = stdlib_re.compile(r"XXX(?P<day>[A-Z]+) de (?P<month>\S+) de (?P<year>[A-Z]+)")
+        monkeypatch.setattr(PtDateParser, "LOCALITY_DATE_RE", fake_re)
+        parser = PtDateParser("XXXAB de março de EF")
+        parser.dates = []
+        # Non-vacuous: the stub regex really matches once, so the only way to
+        # reach zero _build_date calls is via the except/continue.
+        assert len(list(fake_re.finditer(parser.text))) == 1
+        calls = self._spy_on_build_date(monkeypatch)
+        # int("AB") raises ValueError -> lines 316-317 `continue`.
+        parser.get_extra_dates(strict=False)
+        assert calls == []
+        assert parser.dates == []

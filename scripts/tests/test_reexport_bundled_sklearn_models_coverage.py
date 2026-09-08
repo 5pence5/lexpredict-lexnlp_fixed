@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import pickle
+import runpy
 import sys
 import warnings
 from argparse import Namespace
@@ -428,3 +429,21 @@ class TestMain:
         assert rc == 1
         assert f"ERROR missing: {missing}" in captured.out
         assert f"reexport: {valid} legacy_warnings" in captured.out
+
+
+class TestMainGuard:
+    """Exercise the ``if __name__ == "__main__"`` guard (line 319)."""
+
+    def test_guard_missing_path_exits_one(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        missing = tmp_path / "no-such-model.pickle"
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            ["reexport_bundled_sklearn_models.py", "--paths", str(missing)],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            runpy.run_path(str(Path(script_mod.__file__)), run_name="__main__")
+        assert exc_info.value.code == 1
+        assert f"reexport: ERROR missing: {missing}" in capsys.readouterr().out

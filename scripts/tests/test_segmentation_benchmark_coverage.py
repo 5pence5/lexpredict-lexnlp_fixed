@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import runpy
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -257,3 +259,61 @@ class TestMainBenchmarkLane:
         assert rc == 0
         payload = json.loads(output.read_text(encoding="utf-8"))
         assert payload["mode"] == "characters"
+
+
+class TestMainGuard:
+    """Exercise the ``if __name__ == "__main__"`` guard (line 435)."""
+
+    def test_guard_passing_gate_exits_zero(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        script = Path(benchmark.__file__)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "segmentation_benchmark.py",
+                "--characters",
+                "500",
+                "--repeat",
+                "1",
+                "--min-throughput",
+                "1",
+                "--max-peak-mib",
+                "1000000",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            runpy.run_path(str(script), run_name="__main__")
+        assert exc_info.value.code == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["passed"] is True
+        assert payload["mode"] == "characters"
+        assert payload["measurements"]["chunk_count"] > 0
+        assert payload["schema_version"] == benchmark.REPORT_SCHEMA_VERSION
+
+    def test_guard_failing_gate_propagates_exit_one(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        script = Path(benchmark.__file__)
+        monkeypatch.setattr(
+            sys,
+            "argv",
+            [
+                "segmentation_benchmark.py",
+                "--characters",
+                "500",
+                "--repeat",
+                "1",
+                "--min-throughput",
+                "inf",
+                "--max-peak-mib",
+                "1000000",
+            ],
+        )
+        with pytest.raises(SystemExit) as exc_info:
+            runpy.run_path(str(script), run_name="__main__")
+        assert exc_info.value.code == 1
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["passed"] is False
+        assert any(failure["check"] == "throughput_characters_per_second" for failure in payload["failures"])
