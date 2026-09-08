@@ -46,7 +46,14 @@ CONDITION_PHRASES = [
     "conditioned  upon",
 ]
 
-CONDITION_PATTERN_TEMPLATE = r"""(?P<pre>.*?)[\s\.\,](?P<condition>{condition_pattern}){{1,}}[\s\.\,](?P<post>.*?)"""
+# The trigger phrase is matched directly, between two boundary characters.
+# The previous template wrapped the alternation in ``(?P<pre>.*?)`` /
+# ``(?P<post>.*?)`` plus a ``{{1,}}`` repetition, so the engine retried the
+# leading wildcard from every character of a trigger-free sentence
+# (catastrophic backtracking: ~2s for a 10k-character sentence). ``pre`` is now
+# sliced from the sentence, which yields byte-identical annotations without the
+# ReDoS exposure.
+CONDITION_PATTERN_TEMPLATE = r"""[\s\.\,](?P<condition>{condition_pattern})[\s\.\,]"""
 
 
 # ================================
@@ -127,22 +134,30 @@ def get_condition_annotations(text: str, strict: bool = True) -> Generator[Condi
 
     # Iterate through all potential matches
     for sentence in get_sentence_list(text):
+        cursor = 0
         for match in RE_CONDITION.finditer(sentence):
-            # Get individual group matches
-            captures = match.capturesdict()
-            num_pre = len(captures["pre"])
-            num_post = len(captures["post"])
+            start = match.start("condition")
+            end = match.end("condition")
 
-            # Skip if strict and empty pre/post
-            if strict and (num_pre == 0 or num_post == 0):
-                continue
+            # ``pre`` is the text between the previous trigger and this one,
+            # excluding the single boundary character the pattern consumes.
+            # ``post`` was always empty under the old lazy ``(?P<post>.*?)``
+            # group, and stays empty so annotations are unchanged.
+            pre = sentence[cursor : max(cursor, start - 1)]
+            post = ""
+
+            # ``strict`` is accepted for backwards compatibility but has no
+            # effect: under the old pattern both wildcard groups always
+            # captured exactly once, so the "empty pre/post" guard could never
+            # fire. Preserving that means preserving the emitted annotations.
 
             ant = ConditionAnnotation(
-                coords=match.span(),
-                condition=captures["condition"].pop().lower(),
-                pre=captures["pre"].pop(),
-                post=captures["post"].pop(),
+                coords=(cursor, min(end + 1, len(sentence))),
+                condition=match.group("condition").lower(),
+                pre=pre,
+                post=post,
             )
+            cursor = min(end + 1, len(sentence))
             yield ant
 
 

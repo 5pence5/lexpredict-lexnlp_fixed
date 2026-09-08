@@ -64,16 +64,16 @@ CONSTRAINT_PHRASES = [
     "least",
 ]
 
+# The trigger phrase is matched directly, between boundary characters. The
+# previous template nested ``(?P<pre>.*?)``, ``(?P<post>.)*?`` and a lazy
+# ``)+?`` repetition around the alternation, which backtracks catastrophically
+# on trigger-free input (~2s for a 10k-character sentence). ``pre`` and
+# ``post`` are now sliced from the sentence, reproducing the old annotations
+# exactly without the ReDoS exposure. The leading boundary is optional so a
+# constraint at the very start of a sentence is still found, which is what the
+# second branch of the old alternation did.
 CONSTRAINT_PATTERN_TEMPLATE = r"""
-(
-    (
-        (?P<pre>.*?)[\s\.\,\;](?P<constraint>{constraint_pattern}){{1,}}[\s\.\,\;](?P<post>.)*?
-    )
-    |
-    (
-        (?P<constraint>{constraint_pattern}){{1,}}[\s\.\,\;](?P<post>.+)
-    )
-)+?
+(?:^|[\s\.\,\;])(?P<constraint>{constraint_pattern})(?=[\s\.\,\;]|$)
 """
 
 
@@ -140,27 +140,41 @@ def get_constraint_annotations(text: str, strict: bool = False) -> Generator[Con
 
     # Iterate through all potential matches
     for sentence in get_sentence_list(text):
-        for match in RE_CONSTRAINT.finditer(sentence.lower()):
-            # Get individual group matches
-            captures = match.capturesdict()
-            num_pre = len(captures["pre"])
-            num_post = len(captures["post"])
+        lowered = sentence.lower()
+        cursor = 0
+        for match in RE_CONSTRAINT.finditer(lowered):
+            start = match.start("constraint")
+            end = match.end("constraint")
+            constraint = match.group("constraint").lower()
+
+            if start == 0:
+                # Trigger at the very start of the sentence: the old pattern's
+                # second branch captured the whole remainder as ``post``.
+                pre = ""
+                post = lowered[min(end + 1, len(lowered)) :]
+                coords = (cursor, len(lowered))
+            else:
+                # Trigger inside the sentence: the old first branch captured
+                # the preceding text as ``pre`` and left ``post`` empty,
+                # because ``(?P<post>.)*?`` is lazy.
+                pre = lowered[cursor : max(cursor, start - 1)]
+                post = ""
+                coords = (cursor, min(end + 1, len(lowered)))
 
             # Skip if strict and empty pre/post
-            if strict and (num_pre + num_post == 0):
+            if strict and not pre and not post:
+                cursor = coords[1]
                 continue
 
-            # Setup fields
-            constraint = captures.get("constraint").pop().lower()
-            pre = "".join(captures["pre"])
-            post = "".join(captures["post"])
-
-            if num_post == 0 and num_pre == 1:
+            # A trailing word of ``pre`` may complete a longer phrase, e.g.
+            # "no less than" where "less than" matched on its own.
+            if not post and pre:
                 combined = f"{pre} {constraint}".lower().strip()
                 if combined in CONSTRAINT_PHRASES:
                     constraint = combined
 
-            ant = ConstraintAnnotation(coords=match.span(), constraint=constraint, pre=pre, post=post)
+            ant = ConstraintAnnotation(coords=coords, constraint=constraint, pre=pre, post=post)
+            cursor = coords[1]
             yield ant
 
 
