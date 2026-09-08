@@ -85,9 +85,7 @@ class TestLoadPaths:
             seen["path"] = path
             return sentinel
 
-        monkeypatch.setattr(
-            BaseTokenSequenceClassifierModel, "load_from_file_compressed", staticmethod(fake_load)
-        )
+        monkeypatch.setattr(BaseTokenSequenceClassifierModel, "load_from_file_compressed", staticmethod(fake_load))
         detector = ArtifactDetector()
         detector.load_compressed(str(tmp_path / "model.gz"))
         assert detector.model is sentinel
@@ -174,7 +172,13 @@ class TestTrainAndSave:
         def fake_tokens() -> list[str]:
             return tokens
 
-        def fake_train(amount_tokens: list[str], save_path: str, active: DetectingSettings, train_df: pandas.DataFrame, compress: bool = False) -> None:
+        def fake_train(
+            amount_tokens: list[str],
+            save_path: str,
+            active: DetectingSettings,
+            train_df: pandas.DataFrame,
+            compress: bool = False,
+        ) -> None:
             seen["amount_tokens"] = amount_tokens
             seen["save_path"] = save_path
             seen["settings"] = active
@@ -232,9 +236,7 @@ class TestSaveHelpers:
     def test_save_compressed_model_delegates_with_path(self, tmp_path) -> None:
         seen: dict[str, Any] = {}
         detector = ArtifactDetector()
-        detector.model = SimpleNamespace(
-            save_in_file_compressed=lambda path: seen.setdefault("path", path)
-        )
+        detector.model = SimpleNamespace(save_in_file_compressed=lambda path: seen.setdefault("path", path))
         target = str(tmp_path / "model.gz")
         detector.save_compressed_model(target)
         assert seen["path"] == target

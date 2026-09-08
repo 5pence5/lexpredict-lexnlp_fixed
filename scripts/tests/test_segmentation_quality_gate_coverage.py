@@ -15,10 +15,7 @@ from scripts import segmentation_quality_gate
 
 
 def _external_payload() -> dict:
-    text = (
-        "1. TERM\nThe agreement lasts for three years.\n\n"
-        "2. PRICE\nThe annual price is £12,500 plus VAT.\n"
-    )
+    text = "1. TERM\nThe agreement lasts for three years.\n\n2. PRICE\nThe annual price is £12,500 plus VAT.\n"
     answer = "The annual price is £12,500 plus VAT."
     start = text.index(answer)
     return {
@@ -56,9 +53,7 @@ def _bound_external_payload() -> dict:
             item["index"],
         ),
     )
-    payload["documents"][0]["queries"][0]["ranked_chunk_ids"] = [
-        item["chunk_id"] for item in ranked
-    ]
+    payload["documents"][0]["queries"][0]["ranked_chunk_ids"] = [item["chunk_id"] for item in ranked]
     payload["ranking_provenance"] = {
         "schema_version": 1,
         "retriever_id": "synthetic-lexical-regression",
@@ -139,9 +134,7 @@ class TestValidateExternalShape:
 
     def test_duplicate_query_id_rejected(self) -> None:
         payload = _external_payload()
-        payload["documents"][0]["queries"].append(
-            copy.deepcopy(payload["documents"][0]["queries"][0])
-        )
+        payload["documents"][0]["queries"].append(copy.deepcopy(payload["documents"][0]["queries"][0]))
         with pytest.raises(ValueError, match="duplicate query id"):
             gate._validate_external_shape(payload, require_rankings=False)
 
@@ -172,7 +165,7 @@ class TestValidateExternalShape:
     def test_candidate_chunking_fixed_fields_are_pinned(self) -> None:
         payload = _external_payload()
         payload["candidate_chunking"]["structure_profile"] = "statute"
-        with pytest.raises(ValueError, match="candidate_chunking.structure_profile"):
+        with pytest.raises(ValueError, match=r"candidate_chunking\.structure_profile"):
             gate._validate_external_shape(payload, require_rankings=False)
 
     @pytest.mark.parametrize("max_chars", [0, -5, "48", True, 48.5])
@@ -200,14 +193,14 @@ class TestRankingProvenance:
         payload = _bound_external_payload()
         prepared = gate.prepare_external_manifest(_external_payload())
         payload["ranking_provenance"]["retriever_id"] = ""
-        with pytest.raises(ValueError, match="ranking_provenance.retriever_id"):
+        with pytest.raises(ValueError, match=r"ranking_provenance\.retriever_id"):
             gate._validate_ranking_provenance(payload, prepared)
 
     def test_bad_provenance_schema_version_rejected(self) -> None:
         payload = _bound_external_payload()
         prepared = gate.prepare_external_manifest(_external_payload())
         payload["ranking_provenance"]["schema_version"] = 2
-        with pytest.raises(ValueError, match="ranking_provenance.schema_version must be 1"):
+        with pytest.raises(ValueError, match=r"ranking_provenance\.schema_version must be 1"):
             gate._validate_ranking_provenance(payload, prepared)
 
 

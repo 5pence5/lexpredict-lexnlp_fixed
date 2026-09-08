@@ -8,11 +8,11 @@ import numpy as np
 import pytest
 from pandas import Series
 
+from lexnlp.extract.en.contracts import runtime_model
 from lexnlp.extract.en.contracts.predictors import (
     ProbabilityPredictorContractType,
     ProbabilityPredictorIsContract,
 )
-from lexnlp.extract.en.contracts import runtime_model
 from lexnlp.ml import catalog as ml_catalog
 from lexnlp.ml.predictor import ProbabilityPredictor
 
@@ -30,9 +30,7 @@ def _is_contract_instance(proba_positive: float) -> ProbabilityPredictorIsContra
     return obj
 
 
-def _contract_type_instance(
-    probas: list[float], classes: list[str]
-) -> ProbabilityPredictorContractType:
+def _contract_type_instance(probas: list[float], classes: list[str]) -> ProbabilityPredictorContractType:
     obj = ProbabilityPredictorContractType.__new__(ProbabilityPredictorContractType)
 
     class _FakePipeline:
@@ -58,9 +56,7 @@ class TestIsContractFallbackFailure:
         )
         legacy_path = tmp_path / "legacy.cloudpickle"
         legacy_path.write_bytes(b"junk")
-        monkeypatch.setattr(
-            ml_catalog, "get_path_from_catalog", lambda tag: legacy_path
-        )
+        monkeypatch.setattr(ml_catalog, "get_path_from_catalog", lambda tag: legacy_path)
 
         import cloudpickle
 
@@ -74,17 +70,13 @@ class TestIsContractFallbackFailure:
 
 class TestIsContractSanityCheck:
     def test_three_classes_raises_value_error(self):
-        obj = ProbabilityPredictorIsContract.__new__(
-            ProbabilityPredictorIsContract
-        )
+        obj = ProbabilityPredictorIsContract.__new__(ProbabilityPredictorIsContract)
         obj.pipeline = SimpleNamespace(classes_=[0, 1, 2])  # type: ignore[assignment]
         with pytest.raises(ValueError):
             obj._sanity_check()
 
     def test_two_classes_passes(self):
-        obj = ProbabilityPredictorIsContract.__new__(
-            ProbabilityPredictorIsContract
-        )
+        obj = ProbabilityPredictorIsContract.__new__(ProbabilityPredictorIsContract)
         obj.pipeline = SimpleNamespace(classes_=[0, 1])  # type: ignore[assignment]
         assert obj._sanity_check() is None
 
@@ -100,9 +92,7 @@ class TestIsContractReturnProbability:
 
     def test_negative_with_probability(self):
         predictor = _is_contract_instance(0.2)
-        classification, probability = predictor.is_contract(
-            "some text", min_probability=0.5, return_probability=True
-        )
+        classification, probability = predictor.is_contract("some text", min_probability=0.5, return_probability=True)
         assert classification == False  # noqa: E712
         assert probability == pytest.approx(0.2)
 
@@ -140,9 +130,7 @@ class TestContractTypeFallbackFailure:
 
 class TestMakePredictions:
     def test_sorted_descending_and_top_n(self):
-        predictor = _contract_type_instance(
-            [0.1, 0.7, 0.2], ["AAA", "BBB", "CCC"]
-        )
+        predictor = _contract_type_instance([0.1, 0.7, 0.2], ["AAA", "BBB", "CCC"])
         result = predictor.make_predictions("contract text", top_n=2)
         assert isinstance(result, Series)
         assert list(result.index) == ["BBB", "CCC"]
@@ -160,17 +148,10 @@ class TestInferClassification:
     def test_empty_predictions_returns_unknown(self):
         empty = Series([], dtype=float)
         assert empty.empty
-        assert (
-            ProbabilityPredictorContractType.infer_classification(
-                empty, unknown_classification="UNK"
-            )
-            == "UNK"
-        )
+        assert ProbabilityPredictorContractType.infer_classification(empty, unknown_classification="UNK") == "UNK"
 
     def test_below_min_probability_returns_unknown(self):
-        predictions = Series(
-            data=[0.1, 0.05], index=["BBB", "AAA"]
-        )
+        predictions = Series(data=[0.1, 0.05], index=["BBB", "AAA"])
         assert (
             ProbabilityPredictorContractType.infer_classification(
                 predictions,
@@ -181,9 +162,7 @@ class TestInferClassification:
         )
 
     def test_close_runner_up_returns_unknown(self):
-        predictions = Series(
-            data=[0.46, 0.40], index=["BBB", "AAA"]
-        )
+        predictions = Series(data=[0.46, 0.40], index=["BBB", "AAA"])
         assert (
             ProbabilityPredictorContractType.infer_classification(
                 predictions,
@@ -196,39 +175,18 @@ class TestInferClassification:
 
     def test_single_prediction_returns_label(self):
         predictions = Series(data=[0.9], index=["BBB"])
-        assert (
-            ProbabilityPredictorContractType.infer_classification(
-                predictions, unknown_classification="UNK"
-            )
-            == "BBB"
-        )
+        assert ProbabilityPredictorContractType.infer_classification(predictions, unknown_classification="UNK") == "BBB"
 
     def test_confident_prediction_returns_top_label(self):
-        predictions = Series(
-            data=[0.8, 0.1], index=["BBB", "AAA"]
-        )
-        assert (
-            ProbabilityPredictorContractType.infer_classification(
-                predictions, unknown_classification="UNK"
-            )
-            == "BBB"
-        )
+        predictions = Series(data=[0.8, 0.1], index=["BBB", "AAA"])
+        assert ProbabilityPredictorContractType.infer_classification(predictions, unknown_classification="UNK") == "BBB"
 
 
 class TestDetectContractType:
     def test_detect_known_type(self):
-        predictor = _contract_type_instance(
-            [0.1, 0.8, 0.1], ["AAA", "BBB", "CCC"]
-        )
+        predictor = _contract_type_instance([0.1, 0.8, 0.1], ["AAA", "BBB", "CCC"])
         assert predictor.detect_contract_type("contract text") == "BBB"
 
     def test_detect_unknown_type(self):
-        predictor = _contract_type_instance(
-            [0.05, 0.06], ["AAA", "BBB"]
-        )
-        assert (
-            predictor.detect_contract_type(
-                "contract text", unknown_classification="UNK"
-            )
-            == "UNK"
-        )
+        predictor = _contract_type_instance([0.05, 0.06], ["AAA", "BBB"])
+        assert predictor.detect_contract_type("contract text", unknown_classification="UNK") == "UNK"

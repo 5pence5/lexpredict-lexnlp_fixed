@@ -166,7 +166,9 @@ class TestInferDelimitersSingleDelimiter:
         assert result == {"decimal_delimiter": ".", "group_delimiter": ","}
 
     def test_fraction_below_one_group_collision_yields_none_group(self):
-        result = _infer(".50", "en_US", ".", ".", [3, 3, 0])
+        # fr_FR avoids the en_US/de_DE canonical-override branches so the
+        # real locale group (".") collides with the block delimiter.
+        result = _infer(".50", "fr_FR", ".", ".", [3, 3, 0])
         assert result is not None
         assert result["decimal_delimiter"] == "."
         assert result["group_delimiter"] is None
@@ -180,7 +182,9 @@ class TestInferDelimitersSingleDelimiter:
         assert result is None
 
     def test_multi_block_decimal_in_delimiters_yields_none_decimal(self):
-        result = _infer("10.000.000", "de_DE", ",", ".", [3, 3, 0])
+        # en_US decimal "." appears as the only delimiter with valid grouping,
+        # so the decimal slot is reported as None and "." is the group.
+        result = _infer("1.000.000", "en_US", ".", ",", [3, 3, 0])
         assert result is not None
         assert result["decimal_delimiter"] is None
         assert result["group_delimiter"] == "."

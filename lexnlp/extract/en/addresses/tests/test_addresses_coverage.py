@@ -15,10 +15,7 @@ from lexnlp.extract.en.addresses.addresses import (
     load_classifier,
 )
 
-ADDRESS_TEXT = (
-    "Please send mail to 123 Main Street, Los Angeles, CA 90001 "
-    "for processing of this matter."
-)
+ADDRESS_TEXT = "Please send mail to 123 Main Street, Los Angeles, CA 90001 for processing of this matter."
 EXPECTED_SPAN_TEXT = "123 Main Street, Los Angeles, CA"
 
 

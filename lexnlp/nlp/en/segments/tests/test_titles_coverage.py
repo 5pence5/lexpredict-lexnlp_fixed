@@ -107,8 +107,6 @@ class TestBuildModel:
 class TestTrailingTitle:
     def test_title_at_end_of_document_is_yielded(self, monkeypatch) -> None:
         text = "This body line is not a title at all.\nAGREEMENT"
-        fake_model = SimpleNamespace(
-            predict_proba=lambda _features: numpy.array([[0.9, 0.1], [0.05, 0.95]])
-        )
+        fake_model = SimpleNamespace(predict_proba=lambda _features: numpy.array([[0.9, 0.1], [0.05, 0.95]]))
         monkeypatch.setattr(titles_mod, "SECTION_SEGMENTER_MODEL", fake_model)
         assert list(get_titles(text)) == ["AGREEMENT"]
