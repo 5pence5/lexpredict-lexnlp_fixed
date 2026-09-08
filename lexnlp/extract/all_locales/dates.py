@@ -35,13 +35,19 @@ def get_date_annotations(
     locale: str, text: str, strict: bool | None = None, base_date: datetime | None = None, threshold: float = 0.50
 ) -> Generator[DateAnnotation]:
     language = Locale(locale).language
-    routine = ROUTINE_BY_LOCALE.get(language, ROUTINE_BY_LOCALE[DEFAULT_LANGUAGE.code])
     # Only the English routine accepts ``base_date`` and ``threshold``; the
     # German, Spanish and Portuguese parsers take (text, locale, strict).
     # Passing five positional arguments raised TypeError for every non-English
     # locale, so this dispatcher was unusable outside English. Pass by name and
     # only forward what each routine accepts.
-    if language == LANG_EN.code:
+    #
+    # The branch is on which routine was selected, not on the language code. An
+    # unregistered locale (``fr``, ``it``, ...) falls back to the English
+    # routine, and that routine wants a language string and cannot subscript a
+    # Locale, so it has to be called the English way.
+    routine = ROUTINE_BY_LOCALE.get(language)
+    if routine is None or language == LANG_EN.code:
+        routine = ROUTINE_BY_LOCALE.get(language, ROUTINE_BY_LOCALE[DEFAULT_LANGUAGE.code])
         yield from routine(text=text, strict=strict, locale=locale, base_date=base_date, threshold=threshold)
     else:
         # These parsers read attributes off a Locale, not a language string,

@@ -193,3 +193,31 @@ def test_german_amount_dispatch_passes_arguments_by_name():
 
     assert result == ["amount"]
     assert seen == [("1.000,50 Euro", 4, True)]
+
+
+def test_unregistered_locale_falls_back_to_the_english_routine():
+    """A locale with no registered parser must still work.
+
+    The fallback routine is the English one, which wants a language string and
+    cannot subscript a Locale. Branching on the language code rather than on
+    the routine that was actually selected sent unregistered locales down the
+    non-English path and raised ``TypeError: 'Locale' object is not
+    subscriptable``.
+    """
+    for locale in ("fr", "it", "nl"):
+        found = [a.date for a in dates.get_date_annotations(locale, "The date is January 1, 2020.")]
+        assert found, f"{locale} produced no annotation"
+        assert found[0].year == 2020
+
+
+def test_registered_non_english_locales_use_their_own_parser():
+    """es and pt are registered here, so they must not fall through to English."""
+    samples = {
+        "es": "La fecha es 1 de enero de 2020.",
+        "pt": "A data e 1 de janeiro de 2020.",
+    }
+    for locale, text in samples.items():
+        assert locale in dates.ROUTINE_BY_LOCALE
+        found = [a.date for a in dates.get_date_annotations(locale, text)]
+        assert found, f"{locale} produced no annotation"
+        assert found[0].year == 2020
