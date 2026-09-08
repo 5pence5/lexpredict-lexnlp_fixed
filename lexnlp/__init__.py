@@ -35,10 +35,23 @@ def get_models_repo() -> str:
     if slug:
         return f"https://api.github.com/repos/{slug}/releases/tags/"
 
+    # ``MODELS_REPO`` below is a public module-level name that integrations
+    # have historically assigned to. Honour such an assignment when no
+    # environment override is set; without this the name is present, looks
+    # configurable, and is silently ignored. Environment configuration still
+    # wins, because it can be changed after import without mutating module
+    # state. ``_IMPORTED_MODELS_REPO`` records the value computed at import so
+    # an assignment can be told apart from the default.
+    legacy_value = str(globals().get("MODELS_REPO", "") or "").strip()
+    imported_value = str(globals().get("_IMPORTED_MODELS_REPO", "") or "").strip()
+    if legacy_value and legacy_value != imported_value:
+        return legacy_value if legacy_value.endswith("/") else f"{legacy_value}/"
+
     return DEFAULT_MODELS_REPO
 
 
 MODELS_REPO: str = get_models_repo()
+_IMPORTED_MODELS_REPO: str = MODELS_REPO
 
 
 def get_module_path():
