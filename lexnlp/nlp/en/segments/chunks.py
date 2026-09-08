@@ -1,0 +1,1770 @@
+"""Deterministic, authenticated chunks over a lossless document hierarchy."""
+
+from __future__ import annotations
+
+import bisect
+import hashlib
+import json
+import re
+from collections.abc import Callable, Iterable, Iterator, Sequence
+from dataclasses import dataclass
+from enum import Enum
+from typing import TypeAlias
+
+from lexnlp.nlp.en.segments.hierarchy import (
+    DocumentHierarchy,
+    HierarchyManifest,
+    Segment,
+    SegmentKind,
+    StructuralMode,
+    StructuralSpan,
+    StructureProfile,
+    segment_document,
+)
+
+DEFAULT_MAX_CHARS = 4000
+DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_CALLS = 10_000
+DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_INPUT_BYTES = 16_000_000
+DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS = 100_000
+CHUNKING_SCHEMA_VERSION = 2
+CHUNKING_SERIALIZER_VERSION = 1
+TokenCounter: TypeAlias = Callable[[str], int]
+
+
+class ContainerPolicy(str, Enum):
+    PRESERVE = "preserve"
+    PACK_SIBLINGS = "pack_siblings"
+
+
+class TokenCounterPolicy(str, Enum):
+    """Declared capabilities that select the token endpoint search algorithm."""
+
+    MONOTONIC = "monotonic"
+    ARBITRARY = "arbitrary"
+
+
+class TokenSearchLimitExceeded(RuntimeError):
+    """An arbitrary-counter search exhausted an authenticated work envelope."""
+
+    def __init__(self, envelope: str, observed: int, maximum: int) -> None:
+        self.envelope = envelope
+        self.observed = observed
+        self.maximum = maximum
+        super().__init__(
+            f"arbitrary token search {envelope} envelope exceeded: "
+            f"{observed} > {maximum}"
+        )
+
+
+def _integer(value: object, name: str, *, minimum: int | None = None) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{name} must be an integer")
+    if minimum is not None and value < minimum:
+        raise ValueError(f"{name} must be at least {minimum}")
+    return value
+
+
+def _enum(value: object, enum_type: type[Enum], name: str):
+    try:
+        return enum_type(value)
+    except (TypeError, ValueError) as exc:
+        choices = ", ".join(repr(item.value) for item in enum_type)
+        raise ValueError(f"{name} must be one of {choices}") from exc
+
+
+def _digest(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def _digest_value(digest: "hashlib._Hash", value: object) -> None:
+    """Frame supported scalar types without cross-type or sentinel collisions."""
+    if value is None:
+        type_tag = b"N"
+        payload = b""
+    elif isinstance(value, bool):
+        type_tag = b"B"
+        payload = b"1" if value else b"0"
+    elif isinstance(value, int):
+        type_tag = b"I"
+        payload = str(value).encode("ascii")
+    elif isinstance(value, str):
+        type_tag = b"S"
+        payload = value.encode("utf-8", "surrogatepass")
+    else:
+        raise TypeError(f"unsupported digest value type: {type(value).__name__}")
+    digest.update(type_tag)
+    digest.update(len(payload).to_bytes(8, "big"))
+    digest.update(payload)
+
+
+def _attributes(value: object) -> tuple[tuple[str, str], ...]:
+    if value is None:
+        return ()
+    try:
+        result = tuple(value)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise TypeError("attributes must be an iterable of string pairs") from exc
+    seen: set[str] = set()
+    for item in result:
+        if not isinstance(item, tuple) or len(item) != 2:
+            raise TypeError("each attribute must be a (name, value) tuple")
+        name, attribute_value = item
+        if not isinstance(name, str) or not isinstance(attribute_value, str):
+            raise TypeError("attribute names and values must be strings")
+        if name in seen:
+            raise ValueError(f"duplicate attribute name {name!r}")
+        seen.add(name)
+    return result
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkingManifest:
+    source_sha256: str
+    document_id: str | None
+    unit_kind: str
+    budget: int
+    overlap: int
+    respect_boundaries: bool
+    container_policy: ContainerPolicy
+    hierarchy_manifest: HierarchyManifest
+    token_counter_id: str | None = None
+    token_counter_policy: TokenCounterPolicy | None = None
+    token_search_max_calls: int | None = None
+    token_search_max_input_bytes: int | None = None
+    token_search_max_steps: int | None = None
+    schema_version: int = CHUNKING_SCHEMA_VERSION
+    serializer_version: int = CHUNKING_SERIALIZER_VERSION
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.source_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", self.source_sha256) is None
+        ):
+            raise ValueError("source_sha256 must be a lowercase SHA-256 digest")
+        if self.document_id is not None and (
+            not isinstance(self.document_id, str) or not self.document_id
+        ):
+            raise ValueError("document_id must be None or a non-empty string")
+        if self.unit_kind not in {"characters", "tokens"}:
+            raise ValueError("unit_kind must be 'characters' or 'tokens'")
+        _integer(self.budget, "budget", minimum=1)
+        _integer(self.overlap, "overlap", minimum=0)
+        if self.overlap >= self.budget:
+            raise ValueError("overlap must be smaller than budget")
+        if not isinstance(self.respect_boundaries, bool):
+            raise TypeError("respect_boundaries must be a boolean")
+        object.__setattr__(
+            self,
+            "container_policy",
+            _enum(self.container_policy, ContainerPolicy, "container_policy"),
+        )
+        if not isinstance(self.hierarchy_manifest, HierarchyManifest):
+            raise TypeError("hierarchy_manifest must be a HierarchyManifest")
+        if self.hierarchy_manifest.tree_sha256 is None:
+            raise ValueError("hierarchy_manifest must identify the realised tree")
+        _integer(self.schema_version, "schema_version", minimum=1)
+        _integer(self.serializer_version, "serializer_version", minimum=1)
+        search_limits = (
+            self.token_search_max_calls,
+            self.token_search_max_input_bytes,
+            self.token_search_max_steps,
+        )
+        if self.unit_kind == "tokens":
+            if (
+                not isinstance(self.token_counter_id, str)
+                or not self.token_counter_id.strip()
+            ):
+                raise ValueError("token mode requires a non-empty token_counter_id")
+            if self.token_counter_policy is None:
+                raise ValueError(
+                    "token mode requires an explicit token_counter_policy"
+                )
+            policy = _enum(
+                self.token_counter_policy,
+                TokenCounterPolicy,
+                "token_counter_policy",
+            )
+            object.__setattr__(self, "token_counter_policy", policy)
+            if policy is TokenCounterPolicy.ARBITRARY:
+                for name in (
+                    "token_search_max_calls",
+                    "token_search_max_input_bytes",
+                    "token_search_max_steps",
+                ):
+                    _integer(getattr(self, name), name, minimum=1)
+            elif any(value is not None for value in search_limits):
+                raise ValueError(
+                    "token search envelopes are only valid for arbitrary counters"
+                )
+        elif (
+            self.token_counter_id is not None
+            or self.token_counter_policy is not None
+            or any(value is not None for value in search_limits)
+        ):
+            raise ValueError("token counter options are only valid in token mode")
+
+    @property
+    def source_id(self) -> str:
+        hashed = f"sha256:{self.source_sha256}"
+        return f"{self.document_id}@{hashed}" if self.document_id is not None else hashed
+
+    @property
+    def canonical_json(self) -> str:
+        hierarchy = self.hierarchy_manifest
+        payload = {
+            "budget": self.budget,
+            "container_policy": self.container_policy.value,
+            "document_id": self.document_id,
+            "hierarchy_manifest": {
+                "paragraph_backend_id": hierarchy.paragraph_backend_id,
+                "schema_version": hierarchy.schema_version,
+                "sentence_backend_id": hierarchy.sentence_backend_id,
+                "structure_profile": hierarchy.structure_profile.value,
+                "structural_detector_id": hierarchy.structural_detector_id,
+                "structural_mode": hierarchy.structural_mode.value,
+                "tree_sha256": hierarchy.tree_sha256,
+            },
+            "overlap": self.overlap,
+            "respect_boundaries": self.respect_boundaries,
+            "schema_version": self.schema_version,
+            "serializer_version": self.serializer_version,
+            "source_sha256": self.source_sha256,
+            "token_counter_id": self.token_counter_id,
+            "token_counter_policy": (
+                None
+                if self.token_counter_policy is None
+                else self.token_counter_policy.value
+            ),
+            "token_search_max_calls": self.token_search_max_calls,
+            "token_search_max_input_bytes": self.token_search_max_input_bytes,
+            "token_search_max_steps": self.token_search_max_steps,
+            "unit_kind": self.unit_kind,
+        }
+        return json.dumps(
+            payload,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+
+    @property
+    def manifest_id(self) -> str:
+        encoded = self.canonical_json.encode("ascii")
+        return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
+@dataclass(frozen=True, slots=True)
+class SegmentReference:
+    segment_id: str
+    kind: SegmentKind
+    start: int
+    end: int
+    label: str | None = None
+    level: int | None = None
+    attributes: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "kind", _enum(self.kind, SegmentKind, "kind"))
+        _integer(self.start, "start", minimum=0)
+        _integer(self.end, "end", minimum=0)
+        if self.end <= self.start:
+            raise ValueError("segment references must have positive length")
+        expected = f"{self.kind.value}:{self.start}:{self.end}"
+        if not isinstance(self.segment_id, str) or self.segment_id != expected:
+            raise ValueError(f"segment_id must equal {expected!r}")
+        if self.label is not None and not isinstance(self.label, str):
+            raise TypeError("label must be None or a string")
+        if self.level is not None:
+            _integer(self.level, "level", minimum=0)
+        object.__setattr__(self, "attributes", _attributes(self.attributes))
+
+    @classmethod
+    def from_segment(cls, segment: Segment) -> "SegmentReference":
+        if not isinstance(segment, Segment):
+            raise TypeError("segment must be a Segment")
+        return cls(
+            segment.segment_id,
+            segment.kind,
+            segment.start,
+            segment.end,
+            segment.label,
+            segment.level,
+            segment.attributes,
+        )
+
+
+def _labels(
+    segments: Sequence[SegmentReference],
+    kind: SegmentKind,
+) -> tuple[str, ...]:
+    return tuple(
+        reference.label
+        for reference in segments
+        if reference.kind is kind and reference.label is not None
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ChunkProvenance:
+    segments: tuple[SegmentReference, ...] = ()
+    section_labels: tuple[str, ...] = ()
+    clause_labels: tuple[str, ...] = ()
+    list_labels: tuple[str, ...] = ()
+    table_labels: tuple[str, ...] = ()
+    segment_ids: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        try:
+            segments = tuple(self.segments)
+        except TypeError as exc:
+            raise TypeError("segments must be an iterable of SegmentReference") from exc
+        if any(not isinstance(item, SegmentReference) for item in segments):
+            raise TypeError("segments must contain only SegmentReference objects")
+        identifiers = tuple(reference.segment_id for reference in segments)
+        if len(set(identifiers)) != len(identifiers):
+            raise ValueError("provenance segment references must be unique")
+
+        derived = {
+            "section_labels": _labels(segments, SegmentKind.SECTION),
+            "clause_labels": _labels(segments, SegmentKind.CLAUSE),
+            "list_labels": _labels(segments, SegmentKind.LIST_ITEM),
+            "table_labels": _labels(segments, SegmentKind.TABLE),
+            "segment_ids": identifiers,
+        }
+        object.__setattr__(self, "segments", segments)
+        for name, expected in derived.items():
+            supplied = tuple(getattr(self, name))
+            if supplied and supplied != expected:
+                raise ValueError(f"{name} must be derived exactly from segments")
+            object.__setattr__(self, name, expected)
+
+
+def compute_provenance_sha256(
+    provenance: ChunkProvenance,
+    content_provenance: ChunkProvenance,
+    overlap_provenance: ChunkProvenance,
+) -> str:
+    partitions = (
+        ("full", provenance),
+        ("content", content_provenance),
+        ("overlap", overlap_provenance),
+    )
+    if any(not isinstance(item, ChunkProvenance) for _, item in partitions):
+        raise TypeError("all provenance partitions must be ChunkProvenance objects")
+    digest = hashlib.sha256()
+    digest.update(b"lexnlp.chunk-provenance.v1\0")
+    for partition_name, partition in partitions:
+        _digest_value(digest, partition_name)
+        _digest_value(digest, len(partition.segments))
+        for reference in partition.segments:
+            for value in (
+                reference.segment_id,
+                reference.kind.value,
+                reference.start,
+                reference.end,
+                reference.label,
+                reference.level,
+                len(reference.attributes),
+            ):
+                _digest_value(digest, value)
+            for name, value in reference.attributes:
+                _digest_value(digest, name)
+                _digest_value(digest, value)
+    return digest.hexdigest()
+
+
+def compute_chunk_metadata_sha256(
+    *,
+    manifest: ChunkingManifest,
+    index: int,
+    start: int,
+    end: int,
+    new_content_start: int,
+    unit_count: int,
+    text_sha256: str,
+    provenance_sha256: str,
+) -> str:
+    if not isinstance(manifest, ChunkingManifest):
+        raise TypeError("manifest must be a ChunkingManifest")
+    payload = {
+        "end": end,
+        "index": index,
+        "manifest_id": manifest.manifest_id,
+        "new_content_start": new_content_start,
+        "provenance_sha256": provenance_sha256,
+        "schema_version": 1,
+        "start": start,
+        "text_sha256": text_sha256,
+        "unit_count": unit_count,
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class DocumentChunk:
+    index: int
+    start: int
+    end: int
+    text: str
+    text_sha256: str
+    provenance: ChunkProvenance
+    content_provenance: ChunkProvenance
+    overlap_provenance: ChunkProvenance
+    provenance_sha256: str
+    chunk_metadata_sha256: str
+    new_content_start: int
+    unit_count: int
+    manifest: ChunkingManifest
+
+    def __post_init__(self) -> None:
+        _integer(self.index, "index", minimum=0)
+        _integer(self.start, "start", minimum=0)
+        _integer(self.end, "end", minimum=0)
+        _integer(self.new_content_start, "new_content_start", minimum=0)
+        _integer(self.unit_count, "unit_count", minimum=0)
+        if self.end <= self.start:
+            raise ValueError("chunk must have positive length")
+        if not self.start <= self.new_content_start < self.end:
+            raise ValueError("new_content_start must lie inside the chunk")
+        if not isinstance(self.text, str):
+            raise TypeError("text must be a string")
+        if len(self.text) != self.end - self.start:
+            raise ValueError("text length must equal the source span length")
+        actual_text_digest = _digest(self.text)
+        if self.text_sha256 != actual_text_digest:
+            raise ValueError("text does not match text_sha256")
+        for name in (
+            "provenance",
+            "content_provenance",
+            "overlap_provenance",
+        ):
+            if not isinstance(getattr(self, name), ChunkProvenance):
+                raise TypeError(f"{name} must be ChunkProvenance")
+        actual_provenance_digest = compute_provenance_sha256(
+            self.provenance,
+            self.content_provenance,
+            self.overlap_provenance,
+        )
+        if self.provenance_sha256 != actual_provenance_digest:
+            raise ValueError("provenance partitions do not match provenance_sha256")
+        if not isinstance(self.manifest, ChunkingManifest):
+            raise TypeError("manifest must be a ChunkingManifest")
+        if self.unit_count > self.manifest.budget:
+            raise ValueError("unit_count exceeds the manifest budget")
+        if self.manifest.unit_kind == "characters":
+            if self.unit_count != len(self.text):
+                raise ValueError("character unit_count must equal len(text)")
+            if self.new_content_start - self.start > self.manifest.overlap:
+                raise ValueError("character overlap exceeds the manifest overlap")
+        expected_metadata = compute_chunk_metadata_sha256(
+            manifest=self.manifest,
+            index=self.index,
+            start=self.start,
+            end=self.end,
+            new_content_start=self.new_content_start,
+            unit_count=self.unit_count,
+            text_sha256=self.text_sha256,
+            provenance_sha256=self.provenance_sha256,
+        )
+        if self.chunk_metadata_sha256 != expected_metadata:
+            raise ValueError("chunk metadata does not match chunk_metadata_sha256")
+
+    @property
+    def content(self) -> str:
+        return self.text[self.new_content_start - self.start :]
+
+    @property
+    def char_count(self) -> int:
+        return len(self.text)
+
+    @property
+    def chunk_id(self) -> str:
+        return (
+            f"{self.manifest.source_id}:manifest:{self.manifest.manifest_id}"
+            f":chunk:sha256:{self.chunk_metadata_sha256}"
+        )
+
+    @property
+    def overlap_span(self) -> tuple[int, int]:
+        return self.start, self.new_content_start
+
+    @property
+    def overlap_char_count(self) -> int:
+        return self.new_content_start - self.start
+
+    @property
+    def context_provenance(self) -> ChunkProvenance:
+        return self.overlap_provenance
+
+
+_TOKEN_RE = re.compile(r"\w+|[^\w\s]", re.UNICODE)
+
+
+_PROTECTED_KINDS = {
+    SegmentKind.SECTION,
+    SegmentKind.CLAUSE,
+    SegmentKind.TABLE,
+}
+
+
+def count_tokens(text: str) -> int:
+    if not isinstance(text, str):
+        raise TypeError("text must be a string")
+    return sum(1 for _ in _TOKEN_RE.finditer(text))
+
+
+class _HierarchyIndex:
+    def __init__(self, hierarchy: DocumentHierarchy) -> None:
+        self._root = hierarchy.root
+        self._child_ends: dict[int, tuple[int, ...]] = {}
+        stack = [hierarchy.root]
+        boundaries = {0, len(hierarchy.source)}
+        heading_intervals: set[tuple[int, int]] = set()
+        structure_ends: dict[int, set[int]] = {}
+        while stack:
+            node = stack.pop()
+            self._child_ends[id(node)] = tuple(child.end for child in node.children)
+            if node.kind is not SegmentKind.DOCUMENT:
+                boundaries.add(node.start)
+                boundaries.add(node.end)
+                if node.kind in _PROTECTED_KINDS:
+                    structure_ends.setdefault(node.start, set()).add(node.end)
+                for name, value in node.attributes:
+                    if name == "heading_end":
+                        try:
+                            heading_end = int(value)
+                        except ValueError:
+                            continue
+                        if node.start < heading_end <= node.end:
+                            heading_intervals.add((node.start, heading_end))
+                            structure_ends.setdefault(node.start, set()).add(
+                                heading_end
+                            )
+            stack.extend(reversed(node.children))
+        self.boundaries = tuple(sorted(boundaries))
+        self.headings = _HeadingIndex(heading_intervals)
+        self._structure_ends = {
+            start: tuple(sorted(ends))
+            for start, ends in structure_ends.items()
+        }
+
+    def structure_ends_at(self, start: int) -> tuple[int, ...]:
+        return self._structure_ends.get(start, ())
+
+    def fitting_structure_end(self, start: int, limit: int) -> int | None:
+        ends = self.structure_ends_at(start)
+        position = bisect.bisect_right(ends, limit)
+        return None if position == 0 else ends[position - 1]
+
+    def references(self, start: int, end: int) -> tuple[SegmentReference, ...]:
+        if start >= end:
+            return ()
+        result: list[SegmentReference] = []
+        stack = [self._root]
+        while stack:
+            node = stack.pop()
+            if node.end <= start or node.start >= end:
+                continue
+            if node.kind is not SegmentKind.DOCUMENT:
+                result.append(SegmentReference.from_segment(node))
+            if not node.children:
+                continue
+            child_ends = self._child_ends[id(node)]
+            first = bisect.bisect_right(child_ends, start)
+            stop = first
+            while stop < len(node.children) and node.children[stop].start < end:
+                stop += 1
+            # Push only the intersecting index range in reverse preorder.
+            # Slicing node.children[first:] copies every later sibling and
+            # becomes quadratic across thousands of narrow chunks.
+            for child_index in range(stop - 1, first - 1, -1):
+                stack.append(node.children[child_index])
+        return tuple(result)
+
+
+def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
+    """Partition around protected containers at any descendant depth."""
+    contains_protected: dict[int, bool] = {}
+    stack: list[tuple[Segment, bool]] = [(root, False)]
+    while stack:
+        node, visited = stack.pop()
+        if not visited:
+            stack.append((node, True))
+            stack.extend((child, False) for child in reversed(node.children))
+            continue
+        contains_protected[id(node)] = (
+            node.kind in _PROTECTED_KINDS
+            or any(contains_protected[id(child)] for child in node.children)
+        )
+
+    # Scope unprotected gaps to their nearest protected ancestor.  A protected
+    # parent containing deeper protected nodes is still a hard fence even when
+    # no leaf unit is emitted at the parent's own boundary.
+    units: list[tuple[int, int, bool, int | None]] = []
+
+    def emit(
+        start: int,
+        end: int,
+        protected: bool,
+        protected_scope: int | None,
+    ) -> None:
+        if start >= end:
+            return
+        if (
+            not protected
+            and units
+            and not units[-1][2]
+            and units[-1][1] == start
+            and units[-1][3] == protected_scope
+        ):
+            units[-1] = (units[-1][0], end, False, protected_scope)
+        else:
+            units.append((start, end, protected, protected_scope))
+
+    def visit(node: Segment, protected_scope: int | None) -> None:
+        if node.kind in _PROTECTED_KINDS:
+            protected_scope = id(node)
+        protected_children = [
+            child for child in node.children if contains_protected[id(child)]
+        ]
+        if node.kind in _PROTECTED_KINDS and not protected_children:
+            emit(node.start, node.end, True, protected_scope)
+            return
+        if not protected_children:
+            emit(node.start, node.end, False, protected_scope)
+            return
+
+        cursor = node.start
+        for child in protected_children:
+            emit(cursor, child.start, False, protected_scope)
+            visit(child, protected_scope)
+            cursor = child.end
+        emit(cursor, node.end, False, protected_scope)
+
+    visit(root, None)
+    return tuple(
+        (start, end) for start, end, _protected, _scope in units
+    )
+
+
+class _HeadingIndex:
+    """Fresh-relative heading fences with logarithmic crossing queries."""
+
+    def __init__(self, intervals: Iterable[tuple[int, int]]) -> None:
+        longest_by_start: dict[int, int] = {}
+        for start, end in intervals:
+            if end <= start:
+                continue
+            longest_by_start[start] = max(end, longest_by_start.get(start, end))
+        ordered = tuple(sorted(longest_by_start.items()))
+        self.intervals = ordered
+        self.starts = tuple(start for start, _end in ordered)
+        self.ends = tuple(end for _start, end in ordered)
+
+        tree_size = 1
+        while tree_size < len(ordered):
+            tree_size *= 2
+        self._tree_size = tree_size
+        max_ends = [-1] * (tree_size * 2)
+        for index, end in enumerate(self.ends):
+            max_ends[tree_size + index] = end
+        for index in range(tree_size - 1, 0, -1):
+            max_ends[index] = max(max_ends[index * 2], max_ends[index * 2 + 1])
+        self._max_ends = tuple(max_ends)
+
+    def _first_crossing_start(
+        self,
+        fresh_start: int,
+        boundary: int,
+    ) -> int | None:
+        """Find the earliest heading newly crossed by this chunk endpoint."""
+        left = bisect.bisect_right(self.starts, fresh_start)
+        right = bisect.bisect_left(self.starts, boundary)
+        if left >= right:
+            return None
+
+        def find_first(node: int, node_start: int, node_end: int) -> int | None:
+            if (
+                node_end <= left
+                or right <= node_start
+                or self._max_ends[node] <= boundary
+            ):
+                return None
+            if node_end - node_start == 1:
+                return node_start
+            middle = (node_start + node_end) // 2
+            found = find_first(node * 2, node_start, middle)
+            if found is not None:
+                return found
+            return find_first(node * 2 + 1, middle, node_end)
+
+        index = find_first(1, 0, self._tree_size)
+        return None if index is None else self.starts[index]
+
+    def safe_hard_end(self, fresh_start: int, hard_end: int) -> int:
+        crossing_start = self._first_crossing_start(fresh_start, hard_end)
+        return hard_end if crossing_start is None else crossing_start
+
+    def is_safe(self, fresh_start: int, boundary: int) -> bool:
+        return self._first_crossing_start(fresh_start, boundary) is None
+
+
+def _boundary_end(
+    boundaries: Sequence[int],
+    headings: _HeadingIndex,
+    *,
+    fresh_start: int,
+    hard_end: int,
+    respect_boundaries: bool,
+) -> int:
+    if not respect_boundaries:
+        return hard_end
+    hard_end = headings.safe_hard_end(fresh_start, hard_end)
+    position = bisect.bisect_right(boundaries, hard_end)
+    while position:
+        position -= 1
+        candidate = boundaries[position]
+        if candidate <= fresh_start:
+            break
+        if headings.is_safe(fresh_start, candidate):
+            return candidate
+    return hard_end
+
+
+class _TokenCountCache:
+    """A per-planning-step bounded cache for monotonic token counters."""
+
+    def __init__(
+        self,
+        source: str,
+        counter: TokenCounter,
+        *,
+        max_entries: int = 256,
+    ) -> None:
+        self.source = source
+        self.counter = counter
+        self.max_entries = max_entries
+        self.values: dict[tuple[int, int], int] = {}
+
+    def count(self, start: int, end: int) -> int:
+        key = (start, end)
+        cached = self.values.get(key)
+        if cached is not None:
+            return cached
+        value = self.counter(self.source[start:end])
+        _integer(value, "token counter result", minimum=0)
+        if len(self.values) >= self.max_entries:
+            self.values.clear()
+        self.values[key] = value
+        return value
+
+
+def _fitting_token_structure_end(
+    index: _HierarchyIndex,
+    source: str,
+    counter: TokenCounter,
+    *,
+    fresh_start: int,
+    limit: int,
+    budget: int,
+) -> tuple[int, int] | None:
+    """Return the longest same-start structure fitting a monotonic budget."""
+    ends = index.structure_ends_at(fresh_start)
+    high = bisect.bisect_right(ends, limit)
+    low = 0
+    cache = _TokenCountCache(source, counter)
+    while low < high:
+        middle = (low + high) // 2
+        if cache.count(fresh_start, ends[middle]) <= budget:
+            low = middle + 1
+        else:
+            high = middle
+    if low == 0:
+        return None
+    end = ends[low - 1]
+    return end, cache.count(fresh_start, end)
+
+
+def _token_context_start(
+    source: str,
+    counter: TokenCounter,
+    unit_start: int,
+    fresh_start: int,
+    overlap: int,
+) -> int:
+    if overlap == 0 or fresh_start == unit_start:
+        return fresh_start
+    cache = _TokenCountCache(source, counter)
+    best = fresh_start
+    distance = 1
+    first_over: int | None = None
+    while True:
+        candidate = max(unit_start, fresh_start - distance)
+        if cache.count(candidate, fresh_start) <= overlap:
+            best = candidate
+            if candidate == unit_start:
+                return candidate
+            distance *= 2
+        else:
+            first_over = candidate
+            break
+
+    low = first_over
+    high = best
+    while high - low > 1:
+        middle = (low + high) // 2
+        if cache.count(middle, fresh_start) <= overlap:
+            high = middle
+        else:
+            low = middle
+    return high
+
+
+def _raw_token_end(
+    cache: _TokenCountCache,
+    context_start: int,
+    fresh_start: int,
+    limit: int,
+    budget: int,
+) -> int | None:
+    if fresh_start >= limit:
+        return None
+
+    first = fresh_start + 1
+    if cache.count(context_start, first) > budget:
+        # MONOTONIC promises that extending this slice cannot reduce its count.
+        return None
+    last_feasible = first
+
+    distance = max(1, last_feasible - fresh_start)
+    first_over: int | None = None
+    while last_feasible < limit:
+        candidate = min(limit, fresh_start + distance * 2)
+        if candidate <= last_feasible:
+            candidate = min(limit, last_feasible + 1)
+        if cache.count(context_start, candidate) <= budget:
+            last_feasible = candidate
+            if candidate == limit:
+                return candidate
+            distance = candidate - fresh_start
+        else:
+            first_over = candidate
+            break
+
+    if first_over is None:
+        return last_feasible
+
+    low = last_feasible
+    high = first_over
+    while high - low > 1:
+        middle = (low + high) // 2
+        if cache.count(context_start, middle) <= budget:
+            low = middle
+        else:
+            high = middle
+    return low
+
+
+def _token_end(
+    source: str,
+    counter: TokenCounter,
+    boundaries: Sequence[int],
+    headings: _HeadingIndex,
+    *,
+    context_start: int,
+    fresh_start: int,
+    limit: int,
+    budget: int,
+    respect_boundaries: bool,
+) -> tuple[int, int] | None:
+    cache = _TokenCountCache(source, counter)
+    raw = _raw_token_end(cache, context_start, fresh_start, limit, budget)
+    if raw is None:
+        return None
+    if not respect_boundaries:
+        return raw, cache.count(context_start, raw)
+
+    # Heading alignment is advisory even for a declared monotonic counter.
+    # Retain the known-feasible raw endpoint unless the adjusted endpoint is
+    # independently feasible.
+    adjusted = headings.safe_hard_end(fresh_start, raw)
+    boundary_limit = raw
+    if (
+        adjusted > fresh_start
+        and cache.count(context_start, adjusted) <= budget
+    ):
+        boundary_limit = adjusted
+
+    position = bisect.bisect_right(boundaries, boundary_limit)
+    candidate = 0
+    while position:
+        position -= 1
+        boundary = boundaries[position]
+        if boundary <= fresh_start:
+            break
+        if (
+            headings.is_safe(fresh_start, boundary)
+            and cache.count(context_start, boundary) <= budget
+        ):
+            candidate = boundary
+            break
+    if candidate == 0:
+        candidate = boundary_limit
+    count = cache.count(context_start, candidate)
+    if count > budget or candidate <= fresh_start:
+        return None
+    return candidate, count
+
+
+@dataclass(frozen=True, slots=True)
+class _PlannedTokenChunk:
+    context_start: int
+    fresh_start: int
+    end: int
+    unit_count: int
+
+
+class _ArbitraryTokenOracle:
+    """Exact counter cache with document-wide calls, bytes, and steps ledgers."""
+
+    def __init__(
+        self,
+        source: str,
+        counter: TokenCounter,
+        *,
+        max_calls: int,
+        max_input_bytes: int,
+        max_steps: int,
+    ) -> None:
+        self.source = source
+        self.counter = counter
+        self.max_calls = max_calls
+        self.max_input_bytes = max_input_bytes
+        self.max_steps = max_steps
+        self.calls = 0
+        self.input_bytes = 0
+        self.steps = 0
+        self.values: dict[tuple[int, int], int] = {}
+
+    @staticmethod
+    def _limit(envelope: str, observed: int, maximum: int) -> None:
+        if observed > maximum:
+            raise TokenSearchLimitExceeded(envelope, observed, maximum)
+
+    def step(self) -> None:
+        attempted = self.steps + 1
+        self._limit("steps", attempted, self.max_steps)
+        self.steps = attempted
+
+    def count(self, start: int, end: int) -> int:
+        key = (start, end)
+        cached = self.values.get(key)
+        if cached is not None:
+            return cached
+
+        attempted_calls = self.calls + 1
+        self._limit("calls", attempted_calls, self.max_calls)
+
+        # Measure by index before allocating the slice.  The scan stops as soon
+        # as the remaining byte envelope is exceeded, so rejected and accepted
+        # preparation work is itself bounded without an O(n) prefix object graph.
+        remaining_bytes = self.max_input_bytes - self.input_bytes
+        slice_bytes = 0
+        for index in range(start, end):
+            slice_bytes += len(
+                self.source[index].encode("utf-8", "surrogatepass")
+            )
+            if slice_bytes > remaining_bytes:
+                raise TokenSearchLimitExceeded(
+                    "input_bytes",
+                    self.input_bytes + slice_bytes,
+                    self.max_input_bytes,
+                )
+        attempted_bytes = self.input_bytes + slice_bytes
+
+        # Account immediately before the actual call.  A counter exception still
+        # consumed the declared operation.
+        self.calls = attempted_calls
+        self.input_bytes = attempted_bytes
+        value = self.counter(self.source[start:end])
+        _integer(value, "token counter result", minimum=0)
+        self.values[key] = value
+        return value
+
+
+def _arbitrary_contexts(
+    oracle: _ArbitraryTokenOracle,
+    *,
+    unit_start: int,
+    fresh_start: int,
+    overlap: int,
+) -> tuple[int, ...]:
+    if fresh_start == unit_start or overlap == 0:
+        return (fresh_start,)
+
+    # Prefer the greatest source overlap, but retain every exact-feasible
+    # context so a non-monotonic full-slice count cannot strand the partition.
+    contexts: list[int] = []
+    for context_start in range(unit_start, fresh_start):
+        oracle.step()
+        if oracle.count(context_start, fresh_start) <= overlap:
+            contexts.append(context_start)
+    contexts.append(fresh_start)
+    return tuple(contexts)
+
+
+def _registered_boundary(boundaries: Sequence[int], candidate: int) -> bool:
+    position = bisect.bisect_left(boundaries, candidate)
+    return position < len(boundaries) and boundaries[position] == candidate
+
+
+def _arbitrary_end_candidates(
+    oracle: _ArbitraryTokenOracle,
+    boundaries: Sequence[int],
+    headings: _HeadingIndex,
+    *,
+    fresh_start: int,
+    limit: int,
+    respect_boundaries: bool,
+    same_start_ends: Sequence[int] = (),
+) -> Iterator[int]:
+    if not respect_boundaries:
+        for candidate in range(limit, fresh_start, -1):
+            oracle.step()
+            yield candidate
+        return
+
+    # Registered safe structure first.  Before an internal child boundary,
+    # offer longer same-start structures so a fitting heading is not split.
+    same_start_position = bisect.bisect_right(same_start_ends, limit)
+    yielded: set[int] = set()
+    unsafe: set[int] = set()
+    position = bisect.bisect_right(boundaries, limit)
+    while position:
+        position -= 1
+        candidate = boundaries[position]
+        if candidate <= fresh_start:
+            break
+        while same_start_position:
+            structure_end = same_start_ends[same_start_position - 1]
+            if structure_end <= candidate:
+                break
+            same_start_position -= 1
+            oracle.step()
+            if (
+                structure_end <= fresh_start
+                or structure_end in yielded
+                or structure_end in unsafe
+            ):
+                continue
+            if headings.is_safe(fresh_start, structure_end):
+                yielded.add(structure_end)
+                yield structure_end
+            else:
+                unsafe.add(structure_end)
+        oracle.step()
+        if headings.is_safe(fresh_start, candidate):
+            yielded.add(candidate)
+            yield candidate
+        else:
+            unsafe.add(candidate)
+
+    # Then every other heading-safe endpoint, without allocating an O(n) list.
+    for candidate in range(limit, fresh_start, -1):
+        oracle.step()
+        if (
+            candidate in yielded
+            or candidate in unsafe
+            or _registered_boundary(boundaries, candidate)
+        ):
+            continue
+        if headings.is_safe(fresh_start, candidate):
+            yielded.add(candidate)
+            yield candidate
+        else:
+            unsafe.add(candidate)
+
+    # An individually oversized heading must still be strictly splittable.
+    for candidate in range(limit, fresh_start, -1):
+        oracle.step()
+        if candidate in yielded:
+            continue
+        if candidate in unsafe or not headings.is_safe(fresh_start, candidate):
+            yield candidate
+
+
+def _plan_arbitrary_unit(
+    oracle: _ArbitraryTokenOracle,
+    boundaries: Sequence[int],
+    headings: _HeadingIndex,
+    structure_ends_at: Callable[[int], Sequence[int]],
+    *,
+    unit_start: int,
+    unit_end: int,
+    budget: int,
+    overlap: int,
+    respect_boundaries: bool,
+) -> tuple[_PlannedTokenChunk, ...]:
+    # Reachability, rather than a greedy local endpoint, proves that each chosen
+    # edge has a complete suffix partition.
+    reachable = {unit_end}
+    choices: dict[int, _PlannedTokenChunk] = {}
+    for fresh_start in range(unit_end - 1, unit_start - 1, -1):
+        selected: _PlannedTokenChunk | None = None
+        contexts = _arbitrary_contexts(
+            oracle,
+            unit_start=unit_start,
+            fresh_start=fresh_start,
+            overlap=overlap,
+        )
+        # Advancing coverage/structure is primary.  For that endpoint, maximise
+        # overlap by checking exact-feasible contexts from earliest to zero.
+        for candidate in _arbitrary_end_candidates(
+            oracle,
+            boundaries,
+            headings,
+            fresh_start=fresh_start,
+            limit=unit_end,
+            respect_boundaries=respect_boundaries,
+            same_start_ends=structure_ends_at(fresh_start),
+        ):
+            if candidate not in reachable:
+                continue
+            for context_start in contexts:
+                oracle.step()
+                count = oracle.count(context_start, candidate)
+                if count <= budget:
+                    selected = _PlannedTokenChunk(
+                        context_start,
+                        fresh_start,
+                        candidate,
+                        count,
+                    )
+                    break
+            if selected is not None:
+                break
+        if selected is not None:
+            reachable.add(fresh_start)
+            choices[fresh_start] = selected
+
+    if unit_start not in reachable:
+        raise ValueError(
+            "token_counter cannot fit advancing source content within max_tokens"
+        )
+
+    result: list[_PlannedTokenChunk] = []
+    fresh_start = unit_start
+    while fresh_start < unit_end:
+        planned = choices[fresh_start]
+        result.append(planned)
+        fresh_start = planned.end
+    return tuple(result)
+
+
+def _plan_arbitrary_document(
+    source: str,
+    counter: TokenCounter,
+    boundaries: Sequence[int],
+    headings: _HeadingIndex,
+    structure_ends_at: Callable[[int], Sequence[int]],
+    units: Sequence[tuple[int, int]],
+    *,
+    budget: int,
+    overlap: int,
+    respect_boundaries: bool,
+    max_calls: int,
+    max_input_bytes: int,
+    max_steps: int,
+) -> tuple[_PlannedTokenChunk, ...]:
+    oracle = _ArbitraryTokenOracle(
+        source,
+        counter,
+        max_calls=max_calls,
+        max_input_bytes=max_input_bytes,
+        max_steps=max_steps,
+    )
+    result: list[_PlannedTokenChunk] = []
+    for unit_start, unit_end in units:
+        result.extend(
+            _plan_arbitrary_unit(
+                oracle,
+                boundaries,
+                headings,
+                structure_ends_at,
+                unit_start=unit_start,
+                unit_end=unit_end,
+                budget=budget,
+                overlap=overlap,
+                respect_boundaries=respect_boundaries,
+            )
+        )
+    return tuple(result)
+
+
+def _provenance_for(
+    index: _HierarchyIndex,
+    start: int,
+    end: int,
+    new_content_start: int,
+) -> tuple[ChunkProvenance, ChunkProvenance, ChunkProvenance]:
+    full_references = index.references(start, end)
+    content_references = tuple(
+        reference
+        for reference in full_references
+        if reference.end > new_content_start and reference.start < end
+    )
+    overlap_references = (
+        ()
+        if start == new_content_start
+        else tuple(
+            reference
+            for reference in full_references
+            if reference.end > start and reference.start < new_content_start
+        )
+    )
+    return (
+        ChunkProvenance(full_references),
+        ChunkProvenance(content_references),
+        ChunkProvenance(overlap_references),
+    )
+
+
+def _make_chunk(
+    *,
+    index_number: int,
+    source: str,
+    hierarchy_index: _HierarchyIndex,
+    start: int,
+    end: int,
+    new_content_start: int,
+    unit_count: int,
+    manifest: ChunkingManifest,
+) -> DocumentChunk:
+    text = source[start:end]
+    text_sha256 = _digest(text)
+    provenance, content_provenance, overlap_provenance = _provenance_for(
+        hierarchy_index,
+        start,
+        end,
+        new_content_start,
+    )
+    provenance_sha256 = compute_provenance_sha256(
+        provenance,
+        content_provenance,
+        overlap_provenance,
+    )
+    metadata_sha256 = compute_chunk_metadata_sha256(
+        manifest=manifest,
+        index=index_number,
+        start=start,
+        end=end,
+        new_content_start=new_content_start,
+        unit_count=unit_count,
+        text_sha256=text_sha256,
+        provenance_sha256=provenance_sha256,
+    )
+    return DocumentChunk(
+        index_number,
+        start,
+        end,
+        text,
+        text_sha256,
+        provenance,
+        content_provenance,
+        overlap_provenance,
+        provenance_sha256,
+        metadata_sha256,
+        new_content_start,
+        unit_count,
+        manifest,
+    )
+
+
+def _normalise_document(
+    document: str | DocumentHierarchy,
+    *,
+    sentence_segmenter,
+    paragraph_segmenter,
+    structural_spans,
+    structural_mode,
+    structure_profile,
+    sentence_backend_id,
+    paragraph_backend_id,
+    structural_backend_id,
+) -> DocumentHierarchy:
+    if isinstance(document, DocumentHierarchy):
+        mode = _enum(structural_mode, StructuralMode, "structural_mode")
+        profile = _enum(structure_profile, StructureProfile, "structure_profile")
+        if (
+            sentence_segmenter is not None
+            or paragraph_segmenter is not None
+            or structural_spans is not None
+            or sentence_backend_id is not None
+            or paragraph_backend_id is not None
+            or structural_backend_id is not None
+            or mode is not StructuralMode.REPLACE
+            or profile is not StructureProfile.CONSERVATIVE
+        ):
+            raise ValueError(
+                "segmentation options cannot be supplied with DocumentHierarchy"
+            )
+        return document
+    if not isinstance(document, str):
+        raise TypeError("document must be a string or DocumentHierarchy")
+    return segment_document(
+        document,
+        sentence_segmenter=sentence_segmenter,
+        paragraph_segmenter=paragraph_segmenter,
+        structural_spans=structural_spans,
+        structural_mode=structural_mode,
+        structure_profile=structure_profile,
+        sentence_backend_id=sentence_backend_id,
+        paragraph_backend_id=paragraph_backend_id,
+        structural_backend_id=structural_backend_id,
+    )
+
+
+def iter_chunks(
+    document: str | DocumentHierarchy,
+    *,
+    max_chars: int | None = None,
+    max_tokens: int | None = None,
+    token_counter: TokenCounter | None = None,
+    token_counter_id: str | None = None,
+    token_counter_policy: TokenCounterPolicy | str | None = None,
+    token_search_max_calls: int | None = None,
+    token_search_max_input_bytes: int | None = None,
+    token_search_max_steps: int | None = None,
+    overlap_chars: int = 0,
+    overlap_tokens: int = 0,
+    respect_boundaries: bool = True,
+    container_policy: ContainerPolicy | str = ContainerPolicy.PRESERVE,
+    document_id: str | None = None,
+    sentence_segmenter=None,
+    paragraph_segmenter=None,
+    structural_spans: Iterable[StructuralSpan] | None = None,
+    structural_mode: StructuralMode | str = StructuralMode.REPLACE,
+    structure_profile: StructureProfile | str = StructureProfile.CONSERVATIVE,
+    sentence_backend_id: str | None = None,
+    paragraph_backend_id: str | None = None,
+    structural_backend_id: str | None = None,
+) -> Iterator[DocumentChunk]:
+    if max_chars is not None and max_tokens is not None:
+        raise ValueError("max_chars and max_tokens are mutually exclusive")
+    if not isinstance(respect_boundaries, bool):
+        raise TypeError("respect_boundaries must be a boolean")
+    policy = _enum(container_policy, ContainerPolicy, "container_policy")
+
+    if max_tokens is not None:
+        budget = _integer(max_tokens, "max_tokens", minimum=1)
+        if token_counter is None or not callable(token_counter):
+            raise ValueError("max_tokens requires an explicit token_counter")
+        if not isinstance(token_counter_id, str) or not token_counter_id.strip():
+            raise ValueError("max_tokens requires a non-empty token_counter_id")
+        if token_counter_policy is None:
+            raise ValueError(
+                "max_tokens requires an explicit token_counter_policy"
+            )
+        counter_policy = _enum(
+            token_counter_policy,
+            TokenCounterPolicy,
+            "token_counter_policy",
+        )
+        if max_chars is not None or overlap_chars:
+            raise ValueError("character budget options cannot be used in token mode")
+        overlap = _integer(overlap_tokens, "overlap_tokens", minimum=0)
+        unit_kind = "tokens"
+        if counter_policy is TokenCounterPolicy.ARBITRARY:
+            search_max_calls = _integer(
+                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_CALLS
+                if token_search_max_calls is None
+                else token_search_max_calls,
+                "token_search_max_calls",
+                minimum=1,
+            )
+            search_max_input_bytes = _integer(
+                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_INPUT_BYTES
+                if token_search_max_input_bytes is None
+                else token_search_max_input_bytes,
+                "token_search_max_input_bytes",
+                minimum=1,
+            )
+            search_max_steps = _integer(
+                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS
+                if token_search_max_steps is None
+                else token_search_max_steps,
+                "token_search_max_steps",
+                minimum=1,
+            )
+        else:
+            if any(
+                value is not None
+                for value in (
+                    token_search_max_calls,
+                    token_search_max_input_bytes,
+                    token_search_max_steps,
+                )
+            ):
+                raise ValueError(
+                    "token search envelopes are only valid for arbitrary counters"
+                )
+            search_max_calls = None
+            search_max_input_bytes = None
+            search_max_steps = None
+    else:
+        budget = _integer(
+            DEFAULT_MAX_CHARS if max_chars is None else max_chars,
+            "max_chars",
+            minimum=1,
+        )
+        if (
+            token_counter is not None
+            or token_counter_id is not None
+            or token_counter_policy is not None
+            or token_search_max_calls is not None
+            or token_search_max_input_bytes is not None
+            or token_search_max_steps is not None
+        ):
+            raise ValueError("token counter options require max_tokens")
+        if overlap_tokens:
+            raise ValueError("overlap_tokens requires max_tokens")
+        overlap = _integer(overlap_chars, "overlap_chars", minimum=0)
+        unit_kind = "characters"
+        counter_policy = None
+        search_max_calls = None
+        search_max_input_bytes = None
+        search_max_steps = None
+    if overlap >= budget:
+        raise ValueError("overlap must be smaller than the budget")
+
+    hierarchy = _normalise_document(
+        document,
+        sentence_segmenter=sentence_segmenter,
+        paragraph_segmenter=paragraph_segmenter,
+        structural_spans=structural_spans,
+        structural_mode=structural_mode,
+        structure_profile=structure_profile,
+        sentence_backend_id=sentence_backend_id,
+        paragraph_backend_id=paragraph_backend_id,
+        structural_backend_id=structural_backend_id,
+    )
+    source = hierarchy.source
+    if not source:
+        return
+
+    manifest = ChunkingManifest(
+        source_sha256=_digest(source),
+        document_id=document_id,
+        unit_kind=unit_kind,
+        budget=budget,
+        overlap=overlap,
+        respect_boundaries=respect_boundaries,
+        container_policy=policy,
+        hierarchy_manifest=hierarchy.manifest,
+        token_counter_id=token_counter_id,
+        token_counter_policy=counter_policy,
+        token_search_max_calls=search_max_calls,
+        token_search_max_input_bytes=search_max_input_bytes,
+        token_search_max_steps=search_max_steps,
+    )
+    hierarchy_index = _HierarchyIndex(hierarchy)
+    units = (
+        ((0, len(source)),)
+        if not respect_boundaries or policy is ContainerPolicy.PACK_SIBLINGS
+        else _preserved_units(hierarchy.root)
+    )
+    chunk_index = 0
+
+    if unit_kind == "tokens" and counter_policy is TokenCounterPolicy.ARBITRARY:
+        assert token_counter is not None
+        assert search_max_calls is not None
+        assert search_max_input_bytes is not None
+        assert search_max_steps is not None
+        # Arbitrary planning is deliberately eager: limit or partition failure
+        # occurs before iter_chunks yields any partial document output.
+        planned_chunks = _plan_arbitrary_document(
+            source,
+            token_counter,
+            hierarchy_index.boundaries,
+            hierarchy_index.headings,
+            hierarchy_index.structure_ends_at,
+            units,
+            budget=budget,
+            overlap=overlap,
+            respect_boundaries=respect_boundaries,
+            max_calls=search_max_calls,
+            max_input_bytes=search_max_input_bytes,
+            max_steps=search_max_steps,
+        )
+        for planned in planned_chunks:
+            yield _make_chunk(
+                index_number=chunk_index,
+                source=source,
+                hierarchy_index=hierarchy_index,
+                start=planned.context_start,
+                end=planned.end,
+                new_content_start=planned.fresh_start,
+                unit_count=planned.unit_count,
+                manifest=manifest,
+            )
+            chunk_index += 1
+        return
+
+    for unit_start, unit_end in units:
+        fresh_start = unit_start
+        first_in_unit = True
+        while fresh_start < unit_end:
+            if unit_kind == "characters":
+                context_start = (
+                    fresh_start
+                    if first_in_unit
+                    else max(unit_start, fresh_start - overlap)
+                )
+                if context_start + budget <= fresh_start:
+                    context_start = fresh_start
+                hard_end = min(unit_end, context_start + budget)
+                end = _boundary_end(
+                    hierarchy_index.boundaries,
+                    hierarchy_index.headings,
+                    fresh_start=fresh_start,
+                    hard_end=hard_end,
+                    respect_boundaries=respect_boundaries,
+                )
+                if respect_boundaries:
+                    fitting_end = hierarchy_index.fitting_structure_end(
+                        fresh_start,
+                        min(unit_end, fresh_start + budget),
+                    )
+                    if fitting_end is not None and end < fitting_end:
+                        if context_start != fresh_start:
+                            context_start = fresh_start
+                            hard_end = min(unit_end, fresh_start + budget)
+                            end = _boundary_end(
+                                hierarchy_index.boundaries,
+                                hierarchy_index.headings,
+                                fresh_start=fresh_start,
+                                hard_end=hard_end,
+                                respect_boundaries=respect_boundaries,
+                            )
+                        if (
+                            end < fitting_end
+                            and hierarchy_index.headings.is_safe(
+                                fresh_start,
+                                fitting_end,
+                            )
+                        ):
+                            end = fitting_end
+                if end <= fresh_start:
+                    context_start = fresh_start
+                    hard_end = min(unit_end, context_start + budget)
+                    end = _boundary_end(
+                        hierarchy_index.boundaries,
+                        hierarchy_index.headings,
+                        fresh_start=fresh_start,
+                        hard_end=hard_end,
+                        respect_boundaries=respect_boundaries,
+                    )
+                if end <= fresh_start:
+                    end = min(unit_end, fresh_start + budget)
+                unit_count = end - context_start
+            else:
+                assert token_counter is not None
+                context_start = (
+                    fresh_start
+                    if first_in_unit
+                    else _token_context_start(
+                        source,
+                        token_counter,
+                        unit_start,
+                        fresh_start,
+                        overlap,
+                    )
+                )
+                planned = _token_end(
+                    source,
+                    token_counter,
+                    hierarchy_index.boundaries,
+                    hierarchy_index.headings,
+                    context_start=context_start,
+                    fresh_start=fresh_start,
+                    limit=unit_end,
+                    budget=budget,
+                    respect_boundaries=respect_boundaries,
+                )
+                if respect_boundaries:
+                    fitting = _fitting_token_structure_end(
+                        hierarchy_index,
+                        source,
+                        token_counter,
+                        fresh_start=fresh_start,
+                        limit=unit_end,
+                        budget=budget,
+                    )
+                    if fitting is not None and (
+                        planned is None or planned[0] < fitting[0]
+                    ):
+                        fitting_end, fitting_count = fitting
+                        if context_start != fresh_start:
+                            context_start = fresh_start
+                            planned = _token_end(
+                                source,
+                                token_counter,
+                                hierarchy_index.boundaries,
+                                hierarchy_index.headings,
+                                context_start=context_start,
+                                fresh_start=fresh_start,
+                                limit=unit_end,
+                                budget=budget,
+                                respect_boundaries=respect_boundaries,
+                            )
+                        if (
+                            planned is not None
+                            and planned[0] < fitting_end
+                            and hierarchy_index.headings.is_safe(
+                                fresh_start,
+                                fitting_end,
+                            )
+                        ):
+                            planned = fitting_end, fitting_count
+                if planned is None and context_start != fresh_start:
+                    context_start = fresh_start
+                    planned = _token_end(
+                        source,
+                        token_counter,
+                        hierarchy_index.boundaries,
+                        hierarchy_index.headings,
+                        context_start=context_start,
+                        fresh_start=fresh_start,
+                        limit=unit_end,
+                        budget=budget,
+                        respect_boundaries=respect_boundaries,
+                    )
+                if planned is None:
+                    raise ValueError(
+                        "token_counter cannot fit advancing source content "
+                        "within max_tokens"
+                    )
+                end, unit_count = planned
+
+            if end <= fresh_start or unit_count > budget:
+                raise RuntimeError("chunk planner violated its strict progress invariant")
+            yield _make_chunk(
+                index_number=chunk_index,
+                source=source,
+                hierarchy_index=hierarchy_index,
+                start=context_start,
+                end=end,
+                new_content_start=fresh_start,
+                unit_count=unit_count,
+                manifest=manifest,
+            )
+            chunk_index += 1
+            fresh_start = end
+            first_in_unit = False
+
+
+def chunk_document(
+    document: str | DocumentHierarchy,
+    *,
+    max_chars: int | None = None,
+    max_tokens: int | None = None,
+    token_counter: TokenCounter | None = None,
+    token_counter_id: str | None = None,
+    token_counter_policy: TokenCounterPolicy | str | None = None,
+    token_search_max_calls: int | None = None,
+    token_search_max_input_bytes: int | None = None,
+    token_search_max_steps: int | None = None,
+    overlap_chars: int = 0,
+    overlap_tokens: int = 0,
+    respect_boundaries: bool = True,
+    container_policy: ContainerPolicy | str = ContainerPolicy.PRESERVE,
+    document_id: str | None = None,
+    sentence_segmenter=None,
+    paragraph_segmenter=None,
+    structural_spans: Iterable[StructuralSpan] | None = None,
+    structural_mode: StructuralMode | str = StructuralMode.REPLACE,
+    structure_profile: StructureProfile | str = StructureProfile.CONSERVATIVE,
+    sentence_backend_id: str | None = None,
+    paragraph_backend_id: str | None = None,
+    structural_backend_id: str | None = None,
+) -> list[DocumentChunk]:
+    return list(
+        iter_chunks(
+            document,
+            max_chars=max_chars,
+            max_tokens=max_tokens,
+            token_counter=token_counter,
+            token_counter_id=token_counter_id,
+            token_counter_policy=token_counter_policy,
+            token_search_max_calls=token_search_max_calls,
+            token_search_max_input_bytes=token_search_max_input_bytes,
+            token_search_max_steps=token_search_max_steps,
+            overlap_chars=overlap_chars,
+            overlap_tokens=overlap_tokens,
+            respect_boundaries=respect_boundaries,
+            container_policy=container_policy,
+            document_id=document_id,
+            sentence_segmenter=sentence_segmenter,
+            paragraph_segmenter=paragraph_segmenter,
+            structural_spans=structural_spans,
+            structural_mode=structural_mode,
+            structure_profile=structure_profile,
+            sentence_backend_id=sentence_backend_id,
+            paragraph_backend_id=paragraph_backend_id,
+            structural_backend_id=structural_backend_id,
+        )
+    )
+
+
+def reconstruct_chunks(chunks: Iterable[DocumentChunk]) -> str:
+    materialised = tuple(chunks)
+    if not materialised:
+        return ""
+    if any(not isinstance(chunk, DocumentChunk) for chunk in materialised):
+        raise TypeError("chunks must contain only DocumentChunk objects")
+    manifest = materialised[0].manifest
+    expected_start = 0
+    pieces: list[str] = []
+    for expected_index, chunk in enumerate(materialised):
+        if chunk.index != expected_index:
+            raise ValueError("chunks must be ordered with contiguous indices")
+        if chunk.manifest != manifest:
+            raise ValueError("chunks do not share one manifest")
+        if chunk.new_content_start != expected_start:
+            raise ValueError("chunks do not provide contiguous fresh source coverage")
+        pieces.append(chunk.content)
+        expected_start = chunk.end
+    reconstructed = "".join(pieces)
+    if _digest(reconstructed) != manifest.source_sha256:
+        raise ValueError("reconstructed chunks do not match the manifest source SHA-256")
+    return reconstructed
+
+
+__all__ = [
+    "CHUNKING_SCHEMA_VERSION",
+    "CHUNKING_SERIALIZER_VERSION",
+    "DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_CALLS",
+    "DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_INPUT_BYTES",
+    "DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS",
+    "DEFAULT_MAX_CHARS",
+    "ChunkingManifest",
+    "ChunkProvenance",
+    "ContainerPolicy",
+    "DocumentChunk",
+    "SegmentReference",
+    "TokenCounter",
+    "TokenCounterPolicy",
+    "TokenSearchLimitExceeded",
+    "chunk_document",
+    "compute_chunk_metadata_sha256",
+    "compute_provenance_sha256",
+    "count_tokens",
+    "iter_chunks",
+    "reconstruct_chunks",
+]

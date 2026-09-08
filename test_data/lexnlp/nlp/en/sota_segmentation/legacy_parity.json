@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "marker": "QUALITY_BLOB_RECONSTRUCTION_V3",
+  "description": "Frozen additive-API parity examples for legacy public segmenters.",
+  "cases": [
+    {
+      "id": "legal_abbreviations",
+      "text": "The U.S. Borrower is Acme. It shall pay £2.25 annually. No. 4 survives.",
+      "sentence_texts": [
+        "The U.S.",
+        "Borrower is Acme.",
+        "It shall pay £2.25 annually.",
+        "No. 4 survives."
+      ]
+    },
+    {
+      "id": "single_line_paragraph",
+      "text": "A single paragraph with no terminal newline.",
+      "paragraph_texts": [
+        "A single paragraph with no terminal newline."
+      ]
+    },
+    {
+      "id": "blank_line_legacy_shape",
+      "text": "First operative paragraph.\n\nSecond operative paragraph.",
+      "paragraph_texts": [
+        "First operative paragraph.\n\n",
+        "Second operative paragraph."
+      ]
+    }
+  ]
+}

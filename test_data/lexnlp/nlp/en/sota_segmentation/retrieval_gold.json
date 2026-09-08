@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "marker": "QUALITY_BLOB_RECONSTRUCTION_V3",
+  "description": "Small synthetic character-span retrieval fixture for regression/plumbing only; not SOTA evidence.",
+  "documents": [
+    {
+      "id": "facility_agreement",
+      "text": "1. DEFINITIONS\n‘Availability Period’ means the period from 1 January 2027 to 31 December 2027.\n\n2. INTEREST\n2.1 The rate of interest is SONIA plus the Margin.\n2.2 ‘Margin’ means 2.25 per cent per annum.\n\n3. PREPAYMENT\n3.1 The Borrower may prepay a Loan on five Business Days’ notice.\n3.2 A prepayment must include accrued interest and may not be reborrowed.\n\n4. GOVERNING LAW\nThis Agreement and any non-contractual obligations arising out of it are governed by English law.",
+      "queries": [
+        {
+          "id": "margin_rate",
+          "query": "What is the contractual margin?",
+          "answer_anchors": [
+            "‘Margin’ means 2.25 per cent per annum."
+          ]
+        },
+        {
+          "id": "prepayment_notice",
+          "query": "How much notice is needed to prepay?",
+          "answer_anchors": [
+            "The Borrower may prepay a Loan on five Business Days’ notice."
+          ]
+        },
+        {
+          "id": "governing_law",
+          "query": "Which law governs non-contractual obligations?",
+          "answer_anchors": [
+            "This Agreement and any non-contractual obligations arising out of it are governed by English law."
+          ]
+        }
+      ]
+    },
+    {
+      "id": "data_processing_addendum",
+      "text": "ARTICLE I — SCOPE\nThis Addendum applies to Personal Data processed for the Customer.\n\nARTICLE II — SECURITY\nThe Processor shall encrypt Personal Data in transit and at rest.\nThe Processor shall notify the Customer of a Personal Data Breach without undue delay and, in any event, within 24 hours after confirmation.\n\nARTICLE III — SUB-PROCESSORS\nThe Processor must give at least 30 days’ prior written notice before appointing a new Sub-processor.\nThe Customer may object on reasonable data-protection grounds.",
+      "queries": [
+        {
+          "id": "breach_deadline",
+          "query": "When must a confirmed personal data breach be notified?",
+          "answer_anchors": [
+            "The Processor shall notify the Customer of a Personal Data Breach without undue delay and, in any event, within 24 hours after confirmation."
+          ]
+        },
+        {
+          "id": "subprocessor_notice",
+          "query": "What advance notice is required for a new sub-processor?",
+          "answer_anchors": [
+            "The Processor must give at least 30 days’ prior written notice before appointing a new Sub-processor."
+          ]
+        },
+        {
+          "id": "encryption_scope",
+          "query": "Where must personal data be encrypted?",
+          "answer_anchors": [
+            "The Processor shall encrypt Personal Data in transit and at rest."
+          ]
+        }
+      ]
+    }
+  ]
+}
