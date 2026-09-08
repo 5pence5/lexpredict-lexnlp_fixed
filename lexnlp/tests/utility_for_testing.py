@@ -8,6 +8,7 @@ __email__ = "support@contraxsuite.com"
 
 import codecs
 import os
+import tempfile
 from html import escape
 
 from lexnlp.extract.common.annotations.text_annotation import TextAnnotation
@@ -31,13 +32,22 @@ def load_resource_document(doc_path: str, encoding: str = "ascii") -> str:
     return data
 
 
-def save_test_document(doc_path: str, text: str, encoding: str = "utf-8") -> None:
+def save_test_document(doc_path: str, text: str, encoding: str = "utf-8") -> str:
+    """Write annotated debug output and return where it went.
+
+    This used to write into the tracked ``test_data`` tree, so every test run
+    left the working copy dirty with output nothing asserts on. Output now goes
+    to a scratch directory: ``LEXNLP_TEST_OUTPUT_DIR`` when set, otherwise a
+    per-user directory under the system temp location.
     """
-    saves text as a file in test_data folder
-    """
-    full_path = os.path.join(lexnlp_test_path, doc_path)
+    output_root = os.environ.get("LEXNLP_TEST_OUTPUT_DIR") or os.path.join(
+        tempfile.gettempdir(), "lexnlp-test-output"
+    )
+    full_path = os.path.join(output_root, doc_path)
+    os.makedirs(os.path.dirname(full_path), exist_ok=True)
     with codecs.open(full_path, encoding=encoding, mode="w") as fw:
         fw.write(text)
+    return full_path
 
 
 def annotate_text(text: str, annotations: list[TextAnnotation]) -> str:
