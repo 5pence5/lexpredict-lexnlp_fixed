@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import runpy
 import sys
 from pathlib import Path
 
@@ -186,3 +187,33 @@ class TestUnifyFileStructure:
         captured = capsys.readouterr()
         assert captured.out == ""
         assert "1.0.0" in unify.author
+
+
+class TestMain:
+    def test_missing_release_number_exits(self, capsys: pytest.CaptureFixture[str]) -> None:
+        script = _SCRIPTS_DIR / "unify_py_file_structure.py"
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(sys, "argv", ["unify_py_file_structure.py"])
+            with pytest.raises(SystemExit) as exc_info:
+                runpy.run_path(str(script), run_name="__main__")
+        assert exc_info.value.code == 1
+        assert 'Provide release number in format "1.2.3"' in capsys.readouterr().out
+
+    def test_release_number_argument_runs_unifier(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        script = _SCRIPTS_DIR / "unify_py_file_structure.py"
+        walked: list[str] = []
+
+        def fake_walk(path: str):
+            walked.append(path)
+            return iter(())
+
+        with pytest.MonkeyPatch.context() as mp:
+            mp.setattr(sys, "argv", ["unify_py_file_structure.py", "7.7.7"])
+            mp.setattr("os.walk", fake_walk)
+            mp.setattr("os.listdir", lambda _path: [])
+            runpy.run_path(str(script), run_name="__main__")
+        assert walked, "unify_file_structure should walk parse_paths"
+        assert any(path.endswith("lexnlp") for path in walked)
+        assert capsys.readouterr().out == ""
