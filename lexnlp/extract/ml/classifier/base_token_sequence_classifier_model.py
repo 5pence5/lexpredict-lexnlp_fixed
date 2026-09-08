@@ -107,6 +107,17 @@ class BaseTokenSequenceClassifierModel:
 
     @staticmethod
     def load_from_file(save_path: str):
+        """Load a model from ``save_path``.
+
+        ``.skops`` artifacts go through the audited :mod:`lexnlp.ml.model_io`
+        loader; legacy pickle artifacts keep the ``renamed_load`` shim.
+        """
+        if str(save_path).lower().endswith(".skops"):
+            from pathlib import Path
+
+            from lexnlp.ml.model_io import load_model
+
+            return load_model(Path(save_path), trusted=True)
         with open(save_path, "rb") as fr:
             model = renamed_load(fr)
         return model

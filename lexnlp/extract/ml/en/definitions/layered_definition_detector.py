@@ -50,18 +50,24 @@ class LayeredDefinitionDetector:
             pass
         os.mkdir(temp_folder)
 
-        with ZipFile(file_path) as z:
-            z.extractall(temp_folder)
+        try:
+            with ZipFile(file_path) as z:
+                z.extractall(temp_folder)
 
-        model_files = [i for i in os.listdir(temp_folder) if i.endswith(".pickle")]
-        for file_name in model_files:
-            if file_name == "definition.pickle":
-                self.model_definition.load(os.path.join(temp_folder, file_name))
-            elif file_name == "term.pickle":
-                self.model_term.load(os.path.join(temp_folder, file_name))
-            else:
-                raise RuntimeError(f'Found unknown file "{file_name.filename}" in packed model')
-        shutil.rmtree(temp_folder)
+            model_files = [i for i in os.listdir(temp_folder) if i.endswith((".pickle", ".skops"))]
+            if not model_files:
+                raise RuntimeError(f'No model members found in packed model "{file_path}"')
+            for file_name in model_files:
+                stem = os.path.splitext(file_name)[0]
+                member_path = os.path.join(temp_folder, file_name)
+                if stem == "definition":
+                    self.model_definition.load(member_path)
+                elif stem == "term":
+                    self.model_term.load(member_path)
+                else:
+                    raise RuntimeError(f'Found unknown file "{file_name}" in packed model')
+        finally:
+            shutil.rmtree(temp_folder, ignore_errors=True)
         self.initialized = True
 
     def get_annotations(self, sentence: str) -> list[DefinitionAnnotation]:

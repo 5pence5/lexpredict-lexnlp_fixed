@@ -83,6 +83,10 @@ DEFAULT_TRUSTED_ALLOWLIST: frozenset[str] = frozenset(
         "nltk.tokenize.punkt.PunktParameters",
         "nltk.tokenize.punkt.PunktLanguageVars",
         "nltk.tokenize.punkt.PunktToken",
+        # LexNLP's own token-sequence classifier, embedded in the bundled
+        # definition/term detector artifacts. Trusting our own class is safe
+        # and keeps the skops gate closed to everything else.
+        "lexnlp.extract.ml.classifier.token_sequence_model.TokenSequenceClassifierModel",
     }
 )
 
