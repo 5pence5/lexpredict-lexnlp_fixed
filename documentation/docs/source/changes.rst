@@ -126,8 +126,8 @@ Infrastructure
 * ``documentation/LANGUAGE_PARITY_EN_ES_PT.md`` compares English, Spanish and
   Brazilian Portuguese capability by capability, with detection rates measured
   against ``faker``'s locale identifier shapes, and sets out a tiered route to
-  parity.  Portuguese now reaches 15 working capabilities against English's 16;
-  Spanish reaches 6.
+  parity.  Portuguese and English both reach 15 of 15 comparable capabilities;
+  Spanish reaches 6, and nine extractors have no Spanish implementation at all.
 
 Known limitations
 ~~~~~~~~~~~~~~~~~

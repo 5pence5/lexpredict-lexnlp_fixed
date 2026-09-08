@@ -9,9 +9,9 @@ turned out to extract nothing, and one that looked absent was merely named
 differently.
 
 **Headline:** Portuguese is close to English and the remaining gaps are small
-and specific. Spanish is far behind — it has **six** working capabilities
-against English's sixteen, and closing that is a build project, not a wiring
-job.
+and specific — both cover 15 of the 15 capabilities that are comparable across
+the three languages. Spanish covers **6**, and closing that is a build project,
+not a wiring job.
 
 ---
 
@@ -37,9 +37,20 @@ but produced nothing; `absent` means there is no such module.
 | definitions | OK | partial | OK | es matches `se refiere a` but **not** `significa` or `se entiende por` |
 | courts | OK | partial | OK | see §3 — was broken in es until this branch |
 | copyrights | OK¹ | OK | OK | ¹ en module is `copyright.py`, singular (§6) |
-| identifiers | absent² | OK | OK | ² en equivalents live under `pii` (§6) |
-| pii | OK | absent | partial | pt covers email/phone only — **no CPF/RG** (§4) |
-| **Working total** | **16** | **6** | **15** | |
+| national IDs² | OK | OK | OK | ² one row, because the module differs by language: en puts SSN in `pii`, es/pt put NIF/CPF in `identifiers` (§6) |
+| **Working total** | **15 / 15** | **6 / 15** | **15 / 15** | counting a `partial` as working |
+
+Portuguese and English tie at 15. That is not a claim that Portuguese is as
+good as English — the English dictionaries are far deeper (§3) and English has
+extractors Portuguese does not, such as `acts`, `cusip` and `conditions`, which
+are outside this comparison because they have no Spanish or Portuguese analogue
+to compare against. It means the *capability surface* is comparable, and that
+Spanish is the outlier.
+
+**Caveat on the shared row:** the entry points are not interchangeable.
+`pt/pii.py` covers only email and phone, so a caller asking a Portuguese
+document for its PII gets **no CPF or CNPJ** — those are reachable only through
+`pt/identifiers.py`. English does not behave this way. See §4.
 
 ### What Spanish is missing outright
 
