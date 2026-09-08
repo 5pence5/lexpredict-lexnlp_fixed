@@ -46,6 +46,15 @@ unchanged. The benchmark and quality-gate scripts came with them.
 sdist/wheel/source parity checking, duplicate-member and forbidden-member
 detection.
 
+**Trusted asset manifest for model downloads.** Downloads previously trusted an
+optional Content-MD5 response header supplied by the same server as the bytes.
+They are now checked against reviewed SHA256 digests shipped in the package,
+with HTTPS-only URLs, host matching, catalog tags validated as safe relative
+paths, atomic install, and 28 security tests.
+
+**Three CI jobs**: a documentation build with warnings fatal, a pip-audit
+supply-chain job, and the segmentation quality and performance gate.
+
 **Two regression tests**, taken verbatim, that turned out to document real
 defects in master rather than in the branch.
 
@@ -66,6 +75,14 @@ rewritten in full, because the branch's version drops the `post` field and the
 `strict` filter along with the backtracking.
 
 **Locale dispatch.** Their diagnosis is taken, their fix is not; see below.
+
+**Download module.** Their file drops the retry session with backoff on 429 and
+5xx that master added, so the security layer is merged onto master's file
+rather than replacing it.
+
+**nltk floor.** First rejected as an unnecessary forced upgrade, then reversed.
+Adding the audit job showed nltk 3.9.4 carries 35 known vulnerabilities. The
+branch was right.
 
 ## Rejected
 
@@ -128,3 +145,27 @@ These were on master, not in the PR, and are fixed on this branch.
    while exercising nothing.
 
 7. **Court citations recorded no language** when the caller did not name one.
+
+8. **35 known vulnerabilities in nltk 3.9.4**, a hard runtime dependency, plus
+   three more across click, pygments and soupsieve. Found by adding the audit
+   job, not by reading the diff. nltk 3.10.3 clears all but one, which has no
+   upstream fix and affects APIs LexNLP does not call.
+
+9. **The test suite wrote debug output into the tracked test_data tree**, so
+   every run left the working copy dirty with output nothing asserts on.
+
+10. **The docs build emitted 181 warnings**, and neither sphinx-rtd-theme nor
+    pip-audit was declared anywhere the lock could reach.
+
+## One correction worth recording
+
+The paragraph feature window clamps its forward edge by subtracting the window
+size rather than the line position, which is unrelated to how much room is left
+in the document. PR #30 carries a fix for half of it. I took that fix, extended
+it to the other half, and it was wrong to ship: the bundled paragraph segmenter
+was trained on vectors produced by the old arithmetic, so widening the window at
+inference made it stop splitting on blank lines. The segmentation parity suite
+caught it; the unit tests I had run did not. The source is restored and the
+behaviour is now pinned by characterisation tests that say plainly which parts
+are wrong and why correcting them requires retraining the model in the same
+change.
