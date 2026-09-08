@@ -93,11 +93,7 @@ class TestFindCourtByKeyColumn(TestCase):
             found = finder.find_word(phrase.text, True)
             self.assertEqual(1, len(found))
             self.assertEqual("Imaginary Court of Nowhere", found[0][0])
-            self.assertIsNone(
-                parser.find_court_by_key_column(
-                    phrase, finder, parser.court_name_column
-                )
-            )
+            self.assertIsNone(parser.find_court_by_key_column(phrase, finder, parser.court_name_column))
         finally:
             tmpdir.cleanup()
 
@@ -105,9 +101,7 @@ class TestFindCourtByKeyColumn(TestCase):
         parser, tmpdir = _make_parser()
         try:
             phrase = LineOrPhrase(" Supreme Court of Testland ", 7)
-            result = parser.find_court_by_key_column(
-                phrase, parser.finder_court_name, parser.court_name_column
-            )
+            result = parser.find_court_by_key_column(phrase, parser.finder_court_name, parser.court_name_column)
             self.assertIsNotNone(result)
             assert result is not None
             match, found = result

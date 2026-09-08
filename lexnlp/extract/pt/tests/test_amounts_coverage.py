@@ -39,15 +39,11 @@ class TestWordPhraseSkips(TestCase):
 
 class TestAmountValueHelpers(TestCase):
     def test_get_amounts_yields_values(self) -> None:
-        self.assertEqual(
-            [Decimal("100.0000")], list(get_amounts("pagou 100 reais"))
-        )
+        self.assertEqual([Decimal("100.0000")], list(get_amounts("pagou 100 reais")))
 
     def test_get_amounts_empty_text(self) -> None:
         self.assertEqual([], list(get_amounts("")))
 
     def test_get_amount_list_returns_list(self) -> None:
-        self.assertEqual(
-            [Decimal("100.0000")], get_amount_list("pagou 100 reais")
-        )
+        self.assertEqual([Decimal("100.0000")], get_amount_list("pagou 100 reais"))
         self.assertEqual([], get_amount_list(""))
