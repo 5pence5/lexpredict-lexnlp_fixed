@@ -46,7 +46,7 @@ dependencies = [
   "gensim>=4.3.3,<5",
   "joblib>=1.5,<2",
   "lxml>=5.3,<7",
-  "nltk>=3.9,<4",
+  "nltk>=3.10.3,<4",
   "num2words>=0.5.13,<1",
   "numpy>=2.3,<3",
   "pandas>=2.2.0,<3",
@@ -88,6 +88,13 @@ dev = [
   "pylint>=3.3.0",
   "sphinx>=7.4.0",
   "twine>=5.1.1",
+]
+docs = [
+  "sphinx>=7.4.0",
+  "sphinx-rtd-theme>=3.0",
+]
+audit = [
+  "pip-audit>=2.7",
 ]
 stanford = []
 tika = ["tika>=2.6.0"]

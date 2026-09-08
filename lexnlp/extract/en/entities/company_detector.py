@@ -29,6 +29,26 @@ VALID_PUNCTUATION = [",", ".", "&"]
 
 PERSONS_STOP_WORDS = re.compile(r"avenue|amendment|agreement|addendum|article|assignment|exhibit", re.IGNORECASE)
 
+#: A single capitalised word wrapped in quotes is a defined term, not a name:
+#: ``and GERALD GREENWALD (the "Employee")`` defines "Employee", it does not
+#: introduce a person called Employee. Contracts are full of these, and an NER
+#: model that tags them costs precision on exactly the documents this library
+#: exists to read. Multi-word candidates are left alone, because a real party
+#: name is often quoted too (``"Acme Holdings"``).
+DEFINED_TERM_QUOTES = "\"\u201c\u201d\u2018\u2019'`"
+
+
+def _is_quoted_defined_term(candidate: str, text: str) -> bool:
+    """Return True when ``candidate`` only ever appears quoted in ``text``."""
+
+    if len(re.findall(r"\w+", candidate)) != 1:
+        return False
+    quoted = rf"[{re.escape(DEFINED_TERM_QUOTES)}]\s*{re.escape(candidate)}\s*[{re.escape(DEFINED_TERM_QUOTES)}]"
+    if not re.search(quoted, text, re.IGNORECASE):
+        return False
+    bare = rf"(?<![{re.escape(DEFINED_TERM_QUOTES)}\w])\s*{re.escape(candidate)}(?![\w\s]*[{re.escape(DEFINED_TERM_QUOTES)}])"
+    return re.search(bare, text) is None
+
 MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 MONTH_NAMES_STR = "|".join([rf"\-{m}\-" for m in MONTH_NAMES])
 PARTY_PREFIX_STR = rf"^\d\d([0-9\.\s\,]*({MONTH_NAMES_STR}|\-)*[0-9\.\s\,]*)+"
@@ -309,6 +329,9 @@ class CompanyDetector:
                     continue
 
                 if PERSONS_STOP_WORDS.search(person):
+                    continue
+
+                if _is_quoted_defined_term(person, original_sentence):
                     continue
 
                 person = strip_unicode_punctuation(person).strip(string.punctuation).strip(string.whitespace)
