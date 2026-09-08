@@ -22,5 +22,15 @@ def get_amount_annotations(
     extended_sources: bool = True,
     float_digits: int = 4,
 ) -> Generator[AmountAnnotation]:
-    routine = ROUTINE_BY_LOCALE.get(Locale(locale).language, ROUTINE_BY_LOCALE[DEFAULT_LANGUAGE.code])
-    yield from routine(text, extended_sources, float_digits)
+    language = Locale(locale).language
+    routine = ROUTINE_BY_LOCALE.get(language, ROUTINE_BY_LOCALE[DEFAULT_LANGUAGE.code])
+    # The per-locale routines do not share a parameter order: English takes
+    # (text, extended_sources, float_digits) while German takes
+    # (text, float_digits, return_sources). Dispatching positionally silently
+    # passed ``extended_sources`` as ``float_digits`` for German, so German
+    # amounts were rounded to one decimal place instead of four. Always pass
+    # by name.
+    if language == LANG_DE.code:
+        yield from routine(text=text, float_digits=float_digits, return_sources=extended_sources)
+    else:
+        yield from routine(text=text, extended_sources=extended_sources, float_digits=float_digits)
