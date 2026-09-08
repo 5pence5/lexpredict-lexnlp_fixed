@@ -1,4 +1,4 @@
-|Build Status| |Coverage Status| |image2| |Docs|
+|CI| |Coverage| |Python| |Docs|
 
 LexNLP by LexPredict
 ====================
@@ -30,8 +30,12 @@ LexNLP provides functionality such as:
    -  Dates, recurring dates, and durations
    -  Courts, regulations, and citations
 
+-  Lossless document segmentation: a hierarchy whose leaves concatenate
+   back to the source byte for byte, with deterministic chunking and
+   embedding payloads
 -  Tools for building new clustering and classification methods
--  Hundreds of unit tests from real legal documents
+-  Thousands of unit tests from real legal documents, at 100% statement
+   coverage
 
 .. figure:: https://s3.amazonaws.com/lexpredict.com-marketing/graphics/lexpredict_lexnlp_logo_horizontal_1.png
    :alt: Logo
@@ -92,15 +96,17 @@ Quick Setup (uv + pyproject)
 Optional dependency extras
 --------------------------
 
-============  =========================  ============================================================================================================
-Extra         Pin                        Powers
-============  =========================  ============================================================================================================
-``[arrow]``   ``pyarrow>=17``            ``read_csv_arrow`` and PyArrow-backed extraction DataFrames
-``[hub]``     ``huggingface_hub>=0.25``  ``lexnlp.ml.catalog.hub`` HF Hub mirror downloads
-``[ner]``     ``spacy>=3.7``             Optional spaCy backend for ``lexnlp.extract.ner`` (default backend is NLTK; see ``MODERNIZATION_ROADMAP.md``)
-``[tika]``    ``tika>=2.6.0``            Apache Tika document-parsing helpers
-``[stanford]`` *(empty)*                 Hooks for callers that ship their own Stanford CoreNLP jars
-============  =========================  ============================================================================================================
+==============  ================================  =============================================================================================================
+Extra           Pin                               Powers
+==============  ================================  =============================================================================================================
+``[arrow]``     ``pyarrow>=17``                   ``read_csv_arrow`` and PyArrow-backed extraction DataFrames
+``[audit]``     ``pip-audit>=2.7``                The dependency-vulnerability audit run in CI
+``[docs]``      ``sphinx``, ``sphinx-rtd-theme``  Building the documentation (the CI build treats warnings as fatal)
+``[hub]``       ``huggingface_hub>=0.25``         ``lexnlp.ml.catalog.hub`` HF Hub mirror downloads
+``[ner]``       ``spacy>=3.7``                    Optional spaCy backend for ``lexnlp.extract.ner`` (default backend is NLTK; see ``MODERNIZATION_ROADMAP.md``)
+``[tika]``      ``tika>=2.6.0``                   Apache Tika document-parsing helpers
+``[stanford]``  *(empty)*                         Hooks for callers that ship their own Stanford CoreNLP jars
+==============  ================================  =============================================================================================================
 
 Install with e.g. ``uv pip install -e ".[ner,arrow]"``. None of these
 extras are required for the rule-based extractors.
@@ -214,11 +220,11 @@ Releases
 -  0.1.0: September 30, 2017 - First public release;
    `code <https://github.com/LexPredict/lexpredict-lexnlp/tree/0.1.0>`__
 
-.. |Build Status| image:: https://travis-ci.org/LexPredict/lexpredict-lexnlp.svg?branch=master
-   :target: https://travis-ci.org/LexPredict/lexpredict-lexnlp
-.. |Coverage Status| image:: https://coveralls.io/repos/github/LexPredict/lexpredict-lexnlp/badge.svg?branch=master
-   :target: https://coveralls.io/github/LexPredict/lexpredict-lexnlp?branch=1.4.0
-.. |image2| image:: https://tokei.rs/b1/github/lexpredict/lexpredict-lexnlp?category=code
-   :target: https://github.com/lexpredict/lexpredict-lexnlp
-.. |Docs| image:: https://readthedocs.org/projects/lexpredict-lexnlp/badge/?version=docs-1.4.0
-   :target: http://lexpredict-lexnlp.readthedocs.io/en/docs-1.4.0/
+.. |CI| image:: https://github.com/cicero-im/lexpredict-lexnlp/actions/workflows/ci.yml/badge.svg
+   :target: https://github.com/cicero-im/lexpredict-lexnlp/actions/workflows/ci.yml
+.. |Coverage| image:: https://img.shields.io/badge/coverage-100%25-brightgreen
+   :target: https://github.com/cicero-im/lexpredict-lexnlp/actions/workflows/ci.yml
+.. |Python| image:: https://img.shields.io/badge/python-3.13%20%7C%203.14-blue
+   :target: https://github.com/cicero-im/lexpredict-lexnlp
+.. |Docs| image:: https://readthedocs.org/projects/lexpredict-lexnlp/badge/?version=latest
+   :target: https://lexpredict-lexnlp.readthedocs.io/en/latest/

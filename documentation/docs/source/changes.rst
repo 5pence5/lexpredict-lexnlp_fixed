@@ -7,35 +7,109 @@ Changelog
 Unreleased
 ----------
 
-* Added dependency upper bounds so a breaking major release downstream cannot
-  silently break installs.  Python support remains ``>=3.13,<3.15``.
-* Removed catastrophic backtracking from the condition and constraint
-  extractors.  Trigger-free text of 10,000 characters took 2.1 seconds in each
-  and grew quadratically; it is now 0.0006 seconds and linear.
-* Repaired the multi-locale dispatchers.  Dates raised ``TypeError`` for every
-  non-English locale, German amounts were rounded to one decimal place instead
-  of four, and court citations recorded no language.
-* Completed the skops migration for the layered definition detector, which
-  still pointed at the retired pickle artifact.
-* Fixed a clock-time guard in Portuguese ratios that backtracking could evade,
-  so "10:30 a.m." was read as the ratio 10/3.
-* Added an experimental 2.4.0a1 lossless English legal-document hierarchy with
-  exact source spans, conservative/statute profiles, composable structural,
-  paragraph and sentence backends, and realised-tree manifests.
-* Added an opt-in caller-owned Segment Any Text adapter which requires a pinned
-  backend identity and performs no model import or download.
-* Added deterministic character- or explicit-token-counter chunking with
-  strict budgets, structure-preserving/dense container policies, explicit
-  overlap, content-versus-overlap provenance, canonical manifests and
-  digest-qualified chunk identities.
-* Added a versioned final embedding-payload serialiser for traced headings and
-  table headers, with exact caller-tokeniser validation, canonical payload
-  metadata identities and typed overflow.
-* Added hermetic exact-span, structural, retrieval-plumbing and character/token
+Added
+~~~~~
+
+* An experimental lossless English legal-document hierarchy with exact source
+  spans, conservative and statute profiles, composable structural, paragraph
+  and sentence backends, and realised-tree manifests.  Every character of the
+  source is accounted for, and the leaves concatenate back to the input byte
+  for byte.
+* Deterministic chunking over that hierarchy, in character or explicit
+  token-counter mode, with strict budgets, structure-preserving and dense
+  container policies, explicit overlap, content-versus-overlap provenance,
+  canonical manifests and digest-qualified chunk identities.
+* A versioned embedding-payload serialiser for traced headings and table
+  headers, with exact caller-tokeniser validation, canonical payload metadata
+  identities and typed overflow.
+* An opt-in caller-owned Segment Any Text adapter.  It requires a pinned
+  backend identity and performs no model import or download of its own.
+* ``scripts/segmentation_quality_gate.py`` and
+  ``scripts/segmentation_benchmark.py``, which run on a bare interpreter with
+  no third-party packages installed.
+* Hermetic exact-span, structural, retrieval-plumbing and character/token
   operational regression gates with canonical evidence digests and a dedicated
   statute-profile scaling lane.  These small synthetic fixtures are not
   held-out SOTA evidence; representative legal, layout and multilingual
   evaluation remains a promotion gate.
+
+Security
+~~~~~~~~
+
+* Model downloads are verified against a reviewed manifest of SHA256 digests
+  shipped in the package.  Previously the only integrity check was an optional
+  ``Content-MD5`` response header, supplied by the same server as the bytes it
+  attested to.  Repository and asset URLs must be HTTPS, the asset host must
+  match the manifest repository, release tags are validated as safe relative
+  catalog paths so a tag cannot escape the catalog directory or traverse a
+  symlink, and the install is atomic.  A tag absent from the manifest is
+  refused before any network request.
+* ``nltk`` moves to ``>=3.10.3``, clearing 35 known vulnerabilities in the
+  previously pinned line.  ``click``, ``pygments`` and ``soupsieve`` move with
+  it, clearing three more.
+* Catastrophic backtracking is gone from the condition and constraint
+  extractors.  Both wrapped their trigger alternation in wildcard groups, so
+  trigger-free text backtracked quadratically: 10,000 characters took 2.1
+  seconds in each.  It is now 0.0006 seconds and linear.  This was a
+  denial-of-service exposure on attacker-supplied document text.
+
+Fixed
+~~~~~
+
+* The multi-locale date dispatcher was unusable outside English.  It passed
+  five positional arguments to parsers that accept three, so German, Spanish
+  and Portuguese raised ``TypeError`` on every call.
+* German amounts silently lost precision.  The English and German routines take
+  their parameters in different orders, and positional dispatch handed German
+  ``extended_sources=True`` as ``float_digits``, rounding to one decimal place
+  instead of four.
+* Court citations recorded no language when the caller did not name one.
+* The layered definition detector could not load its own artifact: the asset
+  pipeline ships a skops archive while the loader and its tests still pointed
+  at the retired pickle.
+* A clock-time guard in Portuguese ratios could be evaded by backtracking, so
+  "10:30 a.m." was extracted as the ratio 10/3.
+* ``SectionSegmentizerTrainManager.train_logistic_regression`` asked the
+  ``lbfgs`` solver for an ``l1`` penalty, which it does not support, so the
+  method raised on every call and could never return a model.
+* The test suite no longer writes debug output into the tracked ``test_data``
+  tree, which left the working copy dirty after every run.
+
+Infrastructure
+~~~~~~~~~~~~~~
+
+* Dependency upper bounds, so a breaking major release downstream cannot
+  silently break installs.  Python support remains ``>=3.13,<3.15``.
+* Three CI jobs: a documentation build with warnings fatal, a ``pip-audit``
+  supply-chain audit over the exported runtime lock, and the segmentation
+  quality and performance gate.
+* Statement coverage is 100% across ``lexnlp``, ``scripts`` and ``ci``, with
+  ``fail_under = 100`` configured so it stays there.  The suite went from 1,798
+  passing with 6 failures to 3,871 passing with none.
+* ``ci/check_dist_contents.py`` gains sdist and wheel parity checking,
+  duplicate-member and forbidden-member detection.
+* The documentation build is warning-clean under ``-W``; it previously emitted
+  181 warnings.  ``sphinx.ext.napoleon`` and ``sphinx.ext.todo`` are enabled,
+  and ``docs`` and ``audit`` extras declare the dependencies the build and the
+  audit actually need.
+* Retired ``.travis.yml`` and replaced the broken ``readthedocs.yml``, which
+  pinned Python 3.8 and installed from a requirements file that no longer
+  exists, with ``.readthedocs.yaml``.
+* A ``dependabot.yml`` covering both the ``uv`` and ``github-actions``
+  ecosystems.
+
+Known limitations
+~~~~~~~~~~~~~~~~~
+
+* The paragraph feature window clamps its forward edge by subtracting the
+  window size rather than the line position.  The arithmetic is wrong, but the
+  bundled paragraph segmenter was trained on vectors produced by it, so
+  correcting it without retraining makes the model stop splitting on blank
+  lines.  The behaviour is pinned by characterisation tests until the model can
+  be retrained and re-exported in the same change.
+* The clause and list patterns in the new hierarchy recognise ``1.``, ``1.2``,
+  ``A.1``, ``(a)``, ``(i)``, ``1)`` and bullets, but not bare ``a.`` / ``i.``
+  or ``Article I``, so outlines using those markers are not detected.
 
 2.3.0 - November 30, 2022
 -------------------------

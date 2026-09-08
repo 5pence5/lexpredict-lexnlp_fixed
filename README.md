@@ -1,4 +1,4 @@
-[![Build Status](https://travis-ci.org/LexPredict/lexpredict-lexnlp.svg?branch=master)](https://travis-ci.org/LexPredict/lexpredict-lexnlp) [![Coverage Status](https://coveralls.io/repos/github/LexPredict/lexpredict-lexnlp/badge.svg?branch=master)](https://coveralls.io/github/LexPredict/lexpredict-lexnlp?branch=0.1.8) [![](https://tokei.rs/b1/github/lexpredict/lexpredict-lexnlp?category=code)](https://github.com/lexpredict/lexpredict-lexnlp) [![Docs](https://readthedocs.org/projects/lexpredict-lexnlp/badge/?version=docs-0.1.6)](http://lexpredict-lexnlp.readthedocs.io/en/docs-0.1.6/)
+[![CI](https://github.com/cicero-im/lexpredict-lexnlp/actions/workflows/ci.yml/badge.svg)](https://github.com/cicero-im/lexpredict-lexnlp/actions/workflows/ci.yml) [![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen)](https://github.com/cicero-im/lexpredict-lexnlp/actions/workflows/ci.yml) [![Python](https://img.shields.io/badge/python-3.13%20%7C%203.14-blue)](https://github.com/cicero-im/lexpredict-lexnlp) [![Docs](https://readthedocs.org/projects/lexpredict-lexnlp/badge/?version=latest)](https://lexpredict-lexnlp.readthedocs.io/en/latest/)
 
 # LexNLP by LexPredict
 ## Information retrieval and extraction for real, unstructured legal text
@@ -15,8 +15,10 @@ and other material.
     * Conditional statements and constraints, like "less than" or "later than"
     * Dates, recurring dates, and durations
     * Courts, regulations, and citations
+* Lossless document segmentation: a hierarchy whose leaves concatenate back to
+  the source byte for byte, with deterministic chunking and embedding payloads
 * Tools for building new clustering and classification methods
-* Hundreds of unit tests from real legal documents
+* Thousands of unit tests from real legal documents, at 100% statement coverage
 
 ![Logo](https://s3.amazonaws.com/lexpredict.com-marketing/graphics/lexpredict_lexnlp_logo_horizontal_1.png)
 
@@ -59,6 +61,8 @@ uv pip install --python .venv/bin/python -e ".[dev,test]"
 | Extra | Pin | Powers |
 | --- | --- | --- |
 | `[arrow]` | `pyarrow>=17` | `read_csv_arrow`, PyArrow-backed extraction DataFrames |
+| `[audit]` | `pip-audit>=2.7` | The dependency-vulnerability audit run in CI |
+| `[docs]` | `sphinx`, `sphinx-rtd-theme` | Building the documentation (the CI build treats warnings as fatal) |
 | `[hub]` | `huggingface_hub>=0.25` | `lexnlp.ml.catalog.hub` HF Hub mirror downloads |
 | `[ner]` | `spacy>=3.7` | Optional spaCy backend for `lexnlp.extract.ner` (default backend is NLTK; see below) |
 | `[tika]` | `tika>=2.6.0` | Apache Tika document-parsing helpers |
@@ -75,6 +79,79 @@ The project now uses Astral's native [`uv_build`](https://docs.astral.sh/uv/conc
 uv build           # sdist + wheel
 uv build --wheel   # wheel only
 ```
+
+## New in this branch: `lexnlp.nlp.en.segments` (lossless segmentation)
+
+A document hierarchy that accounts for every character of the source. The leaves
+concatenate back to the input byte for byte, and the tree carries exact spans, so
+a chunk can always be traced to the text it came from.
+
+```python
+from lexnlp.nlp.en.segments import (
+    ContainerPolicy,
+    StructureProfile,
+    chunk_document,
+    segment_document,
+)
+
+# Parse a document into a hierarchy with exact source spans:
+hierarchy = segment_document(text, profile=StructureProfile.CONSERVATIVE)
+assert hierarchy.reconstruct() == text          # lossless, byte for byte
+
+for segment in hierarchy.segments():
+    print(segment.level, segment.kind.value, segment.label, segment.start, segment.end)
+
+# Chunk it under a strict character budget, preserving structure:
+chunks = list(
+    chunk_document(
+        text,
+        max_chars=1000,
+        overlap_chars=100,
+        container_policy=ContainerPolicy.STRUCTURE_PRESERVING,
+    )
+)
+for chunk in chunks:
+    print(chunk.identity, chunk.provenance.content_start, chunk.provenance.content_end)
+```
+
+Chunking also accepts an explicit token counter, so the budget can be enforced
+against the caller's own tokeniser rather than a character proxy:
+
+```python
+from lexnlp.nlp.en.segments import TokenCounterPolicy, chunk_document
+
+chunks = list(
+    chunk_document(
+        text,
+        max_tokens=512,
+        token_counter=my_tokeniser.count,
+        token_counter_policy=TokenCounterPolicy.EXACT,
+    )
+)
+```
+
+Sentence boundaries are pluggable. The Segment Any Text adapter is opt-in,
+caller-owned, and imports nothing on its own — you construct and pin the model:
+
+```python
+from lexnlp.nlp.en.segments import SaTSentenceSegmenter
+
+segmenter = SaTSentenceSegmenter(model=my_sat_model, backend_id="sat-3l-sm@1.0")
+hierarchy = segment_document(text, sentence_segmenter=segmenter)
+```
+
+`hierarchy.py`, `chunks.py`, `payloads.py` and `backends.py` import nothing
+outside the standard library, so the quality gate and benchmark run on a bare
+interpreter:
+
+```bash
+python scripts/segmentation_quality_gate.py --json-output artifacts/quality.json
+python scripts/segmentation_benchmark.py --mode characters --characters 200000 \
+    --min-throughput 10000 --max-peak-mib 64
+```
+
+Both are wired into CI. See `documentation/docs/source/guides/lossless_segmentation_api.rst`
+for the full API and `development/segmentation_v2_design.rst` for the design notes.
 
 ## New in this branch: `lexnlp.extract.batch`
 Concurrent and Arrow-native extraction helpers that exercise the Python 3.13 feature set declared in `pyproject.toml`:
