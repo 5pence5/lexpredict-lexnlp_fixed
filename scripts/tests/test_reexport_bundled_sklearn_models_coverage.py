@@ -105,9 +105,7 @@ class TestLoadAddressesClf:
         joblib.dump(payload, path)
         assert script_mod._load_addresses_clf(path) == payload
 
-    def test_value_error_falls_back_to_joblib(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_value_error_falls_back_to_joblib(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         path = tmp_path / "addresses_clf.pickle"
         payload = {"kind": "value-error"}
         joblib.dump(payload, path)
@@ -118,9 +116,7 @@ class TestLoadAddressesClf:
         monkeypatch.setattr("lexnlp.utils.unpickler.renamed_load", boom)
         assert script_mod._load_addresses_clf(path) == payload
 
-    def test_key_error_falls_back_to_joblib(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_key_error_falls_back_to_joblib(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         path = tmp_path / "addresses_clf.pickle"
         payload = {"kind": "key-error"}
         joblib.dump(payload, path)
@@ -186,9 +182,7 @@ class TestReexportLayeredSkops:
         assert written == target
         assert not stale.exists()
 
-    def test_cleans_part_file_when_dump_fails(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_cleans_part_file_when_dump_fails(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         path = _write_layered(tmp_path / "definition_model_layered.pickle.gzip")
         target = tmp_path / "definition_model_layered.skops.zip"
         part = target.with_name(target.name + ".part")
@@ -354,9 +348,7 @@ class TestMain:
         assert rc == 1
         assert f"reexport: ERROR missing: {missing}" in captured.out
 
-    def test_pickle_format_reexports_estimator(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_pickle_format_reexports_estimator(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = tmp_path / "section_segmenter.pickle"
         joblib.dump(_tiny_estimator(), path)
         rc = script_mod.main(["--paths", str(path), "--format", "pickle", "--compress", "0"])
@@ -366,9 +358,7 @@ class TestMain:
         loaded = joblib.load(path)
         assert isinstance(loaded, LogisticRegression)
 
-    def test_pickle_format_reexports_layered_gzip(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_pickle_format_reexports_layered_gzip(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = _write_layered(
             tmp_path / "definition_model_layered.pickle.gzip",
             term_obj={"term": "v1"},
@@ -381,9 +371,7 @@ class TestMain:
         reloaded = script_mod.load_layered_definition_models(path)
         assert reloaded["term.pickle"] == {"term": "v1"}
 
-    def test_skops_format_writes_sibling(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_skops_format_writes_sibling(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = tmp_path / "title_locator.pickle"
         joblib.dump(_tiny_estimator(), path)
         rc = script_mod.main(["--paths", str(path), "--format", "skops"])
@@ -395,9 +383,7 @@ class TestMain:
         assert "legacy_warnings before=" in captured.out
         assert "after=0" in captured.out
 
-    def test_skops_format_layered_gzip(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_skops_format_layered_gzip(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = _write_layered(tmp_path / "definition_model_layered.pickle.gzip")
         rc = script_mod.main(["--paths", str(path), "--format", "skops"])
         captured = capsys.readouterr()
@@ -406,9 +392,7 @@ class TestMain:
         assert target.exists()
         assert f"reexport: {path} -> {target}" in captured.out
 
-    def test_remove_legacy_deletes_pickle(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_remove_legacy_deletes_pickle(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         path = tmp_path / "page_segmenter.pickle"
         joblib.dump(_tiny_estimator(), path)
         rc = script_mod.main(["--paths", str(path), "--format", "skops", "--remove-legacy"])
@@ -435,9 +419,7 @@ class TestMain:
         assert path.exists()
         assert "removed-legacy=SKIPPED (target missing)" in captured.out
 
-    def test_mixed_missing_and_valid_still_errors(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_mixed_missing_and_valid_still_errors(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         valid = tmp_path / "ok.pickle"
         joblib.dump(_tiny_estimator(), valid)
         missing = tmp_path / "gone.pickle"

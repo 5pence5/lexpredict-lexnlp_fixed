@@ -411,9 +411,7 @@ class TestConstants:
 class TestLoadLegacyAdditional:
     """Additional tests for the PR-refactored _load_legacy helper."""
 
-    def test_double_failure_reraises_original_pickle_exception(
-        self, tmp_path: Path
-    ) -> None:
+    def test_double_failure_reraises_original_pickle_exception(self, tmp_path: Path) -> None:
         """When both the raw pickle path AND the joblib fallback fail, the
         original pickle exception (not the joblib one) must propagate.
 
@@ -425,9 +423,7 @@ class TestLoadLegacyAdditional:
         with pytest.raises(pickle.UnpicklingError):
             _load_legacy(path)
 
-    def test_joblib_compress_0_round_trips_via_pickle_extension(
-        self, tmp_path: Path
-    ) -> None:
+    def test_joblib_compress_0_round_trips_via_pickle_extension(self, tmp_path: Path) -> None:
         """Regression: joblib.dump(obj, path, compress=0) produces a file that
         does NOT start with the zlib framing byte.  The old guard (_looks_like_
         joblib_pickle) would have blocked the fallback; the PR always retries."""
@@ -460,9 +456,7 @@ class TestLoadLegacyAdditional:
 class TestLoadSkopsAdditional:
     """Additional tests for the PR-refactored _load_skops helper."""
 
-    def test_trusted_false_does_not_call_get_untrusted_types(
-        self, tmp_path: Path
-    ) -> None:
+    def test_trusted_false_does_not_call_get_untrusted_types(self, tmp_path: Path) -> None:
         """The fail-closed (trusted=False) path must skip the type scan entirely."""
         path = dump_model({"ok": True}, tmp_path / "m.skops")
         with patch("lexnlp.ml.model_io.get_untrusted_types") as mock_gut:
@@ -470,20 +464,14 @@ class TestLoadSkopsAdditional:
         mock_gut.assert_not_called()
         assert result == {"ok": True}
 
-    def test_trusted_true_calls_get_untrusted_types_exactly_once(
-        self, tmp_path: Path
-    ) -> None:
+    def test_trusted_true_calls_get_untrusted_types_exactly_once(self, tmp_path: Path) -> None:
         """When trusted=True the artifact is scanned exactly once."""
         path = dump_model({"ok": True}, tmp_path / "m.skops")
-        with patch(
-            "lexnlp.ml.model_io.get_untrusted_types", return_value=[]
-        ) as mock_gut:
+        with patch("lexnlp.ml.model_io.get_untrusted_types", return_value=[]) as mock_gut:
             _load_skops(path, trusted=True)
         mock_gut.assert_called_once_with(file=path)
 
-    def test_rejection_message_lists_all_rejected_types(
-        self, tmp_path: Path
-    ) -> None:
+    def test_rejection_message_lists_all_rejected_types(self, tmp_path: Path) -> None:
         """When multiple types are outside the allowlist, all must appear
         in the ValueError message."""
         path = dump_model({"ok": 1}, tmp_path / "m.skops")
@@ -524,9 +512,7 @@ class TestLoadSkopsAdditional:
         assert result == {"ok": 1}
         # The custom type must have actually flowed into skops.io.load — not
         # just survived the allow-list check.
-        assert custom_type in captured["trusted"], (
-            f"extra_trusted type was filtered before reaching skops: {captured}"
-        )
+        assert custom_type in captured["trusted"], f"extra_trusted type was filtered before reaching skops: {captured}"
 
     def test_type_in_default_allowlist_not_rejected(self, tmp_path: Path) -> None:
         """A type already in DEFAULT_TRUSTED_ALLOWLIST must not be rejected."""

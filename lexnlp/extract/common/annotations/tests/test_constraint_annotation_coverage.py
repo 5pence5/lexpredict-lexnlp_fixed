@@ -48,7 +48,5 @@ class TestConstraintAnnotationCoverage:
         assert d["tags"]["Extracted Entity Post"] == "without consent"
 
     def test_get_cite_value_parts_full(self) -> None:
-        ann = ConstraintAnnotation(
-            coords=(0, 10), constraint="must", pre="party", post="limit"
-        )
+        ann = ConstraintAnnotation(coords=(0, 10), constraint="must", pre="party", post="limit")
         assert ann.get_cite_value_parts() == ["must", "party", "limit"]

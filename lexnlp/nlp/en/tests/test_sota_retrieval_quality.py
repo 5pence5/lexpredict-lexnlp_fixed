@@ -13,7 +13,6 @@ from lexnlp.nlp.en.tests.segmentation_quality import (
     retrieval_metrics,
 )
 
-
 BACKEND_ID = "lexnlp-hermetic-regression-sentences-v1"
 
 
@@ -65,7 +64,7 @@ def test_synthetic_lexical_retrieval_lane_uses_only_generated_chunks():
             sentence_backend_id=BACKEND_ID,
             document_id=document["id"],
         )
-        assert all(chunk.text == document["text"][chunk.start:chunk.end] for chunk in chunks)
+        assert all(chunk.text == document["text"][chunk.start : chunk.end] for chunk in chunks)
         candidate_ids = {chunk.chunk_id for chunk in chunks}
         for query in document["queries"]:
             ranking = lexical_rank(query["query"], chunks)

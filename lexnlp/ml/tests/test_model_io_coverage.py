@@ -15,8 +15,7 @@ import numpy
 import pytest
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.tree import DecisionTreeClassifier
-from sklearn.tree import _tree
+from sklearn.tree import DecisionTreeClassifier, _tree
 
 from lexnlp.ml.model_io import (
     _load_legacy,

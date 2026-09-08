@@ -61,9 +61,7 @@ class TestSsnAnnotationGetCiteValueParts:
         ann = SsnAnnotation(coords=(0, 10), number=None)
         d = ann.get_dictionary_values()
         tags = d["tags"]
-        assert tags["Extracted Entity SSN"] == "", (
-            "SSN tag must be empty string when number is None"
-        )
+        assert tags["Extracted Entity SSN"] == "", "SSN tag must be empty string when number is None"
 
     def test_get_dictionary_values_populated(self) -> None:
         ann = SsnAnnotation(coords=(0, 11), text="SSN: 123-45-6789", number="123-45-6789")

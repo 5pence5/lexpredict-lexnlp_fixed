@@ -13,10 +13,7 @@ from lexnlp.extract.pt.definitions import get_definition_list, get_definitions
 
 
 class TestPtGetDefinitionsWrappers(TestCase):
-    TEXT = (
-        'Neste acordo, o termo "Software" refere-se a: '
-        "(i) o programa de computador e todos os seus componentes;"
-    )
+    TEXT = 'Neste acordo, o termo "Software" refere-se a: (i) o programa de computador e todos os seus componentes;'
 
     def test_get_definitions_yields_dicts(self):
         result = get_definitions(self.TEXT)

@@ -112,9 +112,7 @@ class TestHrbAnnotations(TestCase):
 
 class TestGetIdentifierAnnotations(TestCase):
     def test_extracts_all_kinds(self):
-        text = (
-            f"Steuer-IdNr {VALID_IDNR}, USt-IdNr {VALID_UST}, HRB 12345."
-        )
+        text = f"Steuer-IdNr {VALID_IDNR}, USt-IdNr {VALID_UST}, HRB 12345."
         results = list(get_identifier_annotations(text))
         kinds = sorted(r.kind for r in results)
         self.assertEqual(["hrb", "steuer_idnr", "ust_idnr"], kinds)
@@ -123,11 +121,9 @@ class TestGetIdentifierAnnotations(TestCase):
         self.assertEqual([], list(get_identifier_annotations("")))
 
     def test_dataclass_is_frozen(self):
-        m = DeIdentifierMatch(
-            kind="ust_idnr", value=VALID_UST, surface=VALID_UST, coords=(0, 11)
-        )
+        m = DeIdentifierMatch(kind="ust_idnr", value=VALID_UST, surface=VALID_UST, coords=(0, 11))
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            setattr(m, "value", "DE000000000")
+            m.value = "DE000000000"
 
 
 class TestDeIdentifiersPackageReexports(TestCase):

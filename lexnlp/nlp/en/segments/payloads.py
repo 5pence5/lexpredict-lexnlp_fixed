@@ -8,22 +8,19 @@ counter is run over the exact payload text and overflow is never hidden.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import re
-from typing import Callable, Iterable, TypeAlias
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
 from lexnlp.nlp.en.segments.chunks import DocumentChunk
 from lexnlp.nlp.en.segments.hierarchy import SegmentKind
 
-
 EMBEDDING_PAYLOAD_SERIALIZATION_VERSION = "lexnlp.embedding_payload.v1"
-TokenCounter: TypeAlias = Callable[[str], int]
+type TokenCounter = Callable[[str], int]
 _CONTEXT_ROLES = frozenset({"heading", "table_header"})
-_ANCESTRY_KINDS = frozenset(
-    {SegmentKind.SECTION, SegmentKind.CLAUSE, SegmentKind.TABLE}
-)
+_ANCESTRY_KINDS = frozenset({SegmentKind.SECTION, SegmentKind.CLAUSE, SegmentKind.TABLE})
 
 
 def _non_empty_string(name: str, value: object) -> str:
@@ -70,46 +67,28 @@ class EmbeddingPayload:
     def __post_init__(self) -> None:
         _non_empty_string("chunk_id", self.chunk_id)
         if self.serialization_version != EMBEDDING_PAYLOAD_SERIALIZATION_VERSION:
-            raise ValueError(
-                "serialization_version must be "
-                f"{EMBEDDING_PAYLOAD_SERIALIZATION_VERSION!r}"
-            )
+            raise ValueError(f"serialization_version must be {EMBEDDING_PAYLOAD_SERIALIZATION_VERSION!r}")
         _non_empty_string("tokenizer_id", self.tokenizer_id)
         _positive_integer("max_tokens", self.max_tokens)
-        if (
-            isinstance(self.token_count, bool)
-            or not isinstance(self.token_count, int)
-            or self.token_count < 0
-        ):
+        if isinstance(self.token_count, bool) or not isinstance(self.token_count, int) or self.token_count < 0:
             raise ValueError("token_count must be a non-negative integer")
         if self.token_count > self.max_tokens:
             raise ValueError("token_count cannot exceed max_tokens")
         object.__setattr__(self, "context_fragments", tuple(self.context_fragments))
-        if not all(
-            isinstance(fragment, ContextFragment)
-            for fragment in self.context_fragments
-        ):
+        if not all(isinstance(fragment, ContextFragment) for fragment in self.context_fragments):
             raise TypeError("context_fragments must contain ContextFragment values")
         if not isinstance(self.source_text, str) or not isinstance(self.text, str):
             raise TypeError("source_text and text must be strings")
-        if not isinstance(self.text_sha256, str) or not re.fullmatch(
-            r"[0-9a-f]{64}", self.text_sha256
-        ):
+        if not isinstance(self.text_sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", self.text_sha256):
             raise ValueError("text_sha256 must be a lowercase SHA-256 digest")
 
         if self.context_fragments:
-            expected = (
-                "\n".join(fragment.text for fragment in self.context_fragments)
-                + "\n\n"
-                + self.source_text
-            )
+            expected = "\n".join(fragment.text for fragment in self.context_fragments) + "\n\n" + self.source_text
         else:
             expected = self.source_text
         if self.text != expected:
             raise ValueError("text does not match the versioned payload serialization")
-        actual_digest = hashlib.sha256(
-            self.text.encode("utf-8", "surrogatepass")
-        ).hexdigest()
+        actual_digest = hashlib.sha256(self.text.encode("utf-8", "surrogatepass")).hexdigest()
         if self.text_sha256 != actual_digest:
             raise ValueError("text_sha256 does not match the exact payload text")
 
@@ -129,9 +108,7 @@ class EmbeddingPayload:
             ],
             "max_tokens": self.max_tokens,
             "serialization_version": self.serialization_version,
-            "source_text_sha256": hashlib.sha256(
-                self.source_text.encode("utf-8", "surrogatepass")
-            ).hexdigest(),
+            "source_text_sha256": hashlib.sha256(self.source_text.encode("utf-8", "surrogatepass")).hexdigest(),
             "text_sha256": self.text_sha256,
             "token_count": self.token_count,
             "tokenizer_id": self.tokenizer_id,
@@ -158,9 +135,7 @@ class PayloadBudgetExceeded(ValueError):
         self.actual = actual
         self.maximum = maximum
         self.chunk_id = chunk_id
-        super().__init__(
-            f"embedding payload {chunk_id} uses {actual} tokens; budget is {maximum}"
-        )
+        super().__init__(f"embedding payload {chunk_id} uses {actual} tokens; budget is {maximum}")
 
 
 def _ancestry_fragments(chunk: DocumentChunk) -> tuple[ContextFragment, ...]:
@@ -187,14 +162,8 @@ def _ordered_fragments(
     chunk: DocumentChunk,
     fragments: Iterable[ContextFragment],
 ) -> tuple[ContextFragment, ...]:
-    content_references = {
-        reference.segment_id: reference
-        for reference in chunk.content_provenance.segments
-    }
-    content_order = {
-        reference.segment_id: index
-        for index, reference in enumerate(chunk.content_provenance.segments)
-    }
+    content_references = {reference.segment_id: reference for reference in chunk.content_provenance.segments}
+    content_order = {reference.segment_id: index for index, reference in enumerate(chunk.content_provenance.segments)}
     candidates: list[ContextFragment] = []
     for fragment in fragments:
         if not isinstance(fragment, ContextFragment):
@@ -208,9 +177,7 @@ def _ordered_fragments(
         if fragment.role == "table_header" and owner.kind is not SegmentKind.TABLE:
             raise ValueError("table_header context must be owned by a TABLE segment")
         if fragment.role == "heading" and owner.kind not in _ANCESTRY_KINDS:
-            raise ValueError(
-                "heading context must be owned by a SECTION, CLAUSE, or TABLE segment"
-            )
+            raise ValueError("heading context must be owned by a SECTION, CLAUSE, or TABLE segment")
         candidates.append(fragment)
 
     role_order = {"heading": 0, "table_header": 1}
@@ -264,11 +231,7 @@ def render_embedding_payload(
         raise TypeError("include_ancestry_labels must be a boolean")
 
     supplied = tuple(context_fragments)
-    candidates = (
-        _ancestry_fragments(chunk) + supplied
-        if include_ancestry_labels
-        else supplied
-    )
+    candidates = _ancestry_fragments(chunk) + supplied if include_ancestry_labels else supplied
     ordered = _ordered_fragments(chunk, candidates)
     if ordered:
         text = "\n".join(fragment.text for fragment in ordered) + "\n\n" + chunk.text

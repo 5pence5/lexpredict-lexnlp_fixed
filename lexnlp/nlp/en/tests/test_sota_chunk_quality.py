@@ -21,7 +21,6 @@ from lexnlp.nlp.en.tests.segmentation_quality import (
     deterministic_sentence_spans,
 )
 
-
 BACKEND_ID = "lexnlp-hermetic-regression-sentences-v1"
 WHOLE_SPAN_BACKEND_ID = "lexnlp-hermetic-whole-span-v1"
 
@@ -46,12 +45,12 @@ def assert_chunk_invariants(text, result, *, max_chars=None, max_tokens=None, co
     rebuilt = []
     previous_end = 0
     for index, chunk in enumerate(result):
-        assert chunk.text == text[chunk.start:chunk.end]
+        assert chunk.text == text[chunk.start : chunk.end]
         assert chunk.start <= chunk.new_content_start <= chunk.end
         assert chunk.text_sha256 and len(chunk.text_sha256) == 64
         assert ":chunk:sha256:" in chunk.chunk_id
         assert chunk.new_content_start == previous_end
-        rebuilt.append(text[chunk.new_content_start:chunk.end])
+        rebuilt.append(text[chunk.new_content_start : chunk.end])
         previous_end = chunk.end
         if max_chars is not None:
             assert len(chunk.text) <= max_chars
@@ -72,12 +71,8 @@ def test_character_budget_is_strict_lossless_and_deterministic(max_chars, overla
     first = chunks(text, max_chars=max_chars, overlap_chars=overlap_chars)
     second = chunks(text, max_chars=max_chars, overlap_chars=overlap_chars)
     assert_chunk_invariants(text, first, max_chars=max_chars)
-    assert [
-        (item.start, item.new_content_start, item.end, item.chunk_id)
-        for item in first
-    ] == [
-        (item.start, item.new_content_start, item.end, item.chunk_id)
-        for item in second
+    assert [(item.start, item.new_content_start, item.end, item.chunk_id) for item in first] == [
+        (item.start, item.new_content_start, item.end, item.chunk_id) for item in second
     ]
 
 
@@ -132,9 +127,7 @@ def test_non_monotonic_token_counter_cannot_break_the_hard_cap():
         token_search_max_steps=20_000,
     )
     assert result
-    assert_chunk_invariants(
-        text, result, max_tokens=6, counter=deliberately_non_monotonic
-    )
+    assert_chunk_invariants(text, result, max_tokens=6, counter=deliberately_non_monotonic)
 
 
 @pytest.mark.parametrize(
@@ -159,12 +152,7 @@ def test_empty_source_has_no_chunks():
     assert chunks("", max_chars=10) == []
 
 
-SECTION_TEXT = (
-    "1. FIRST\nAlpha section.\n\n"
-    "2. SECOND\nBeta section.\n\n"
-    "3. THIRD\nGamma section."
-)
-
+SECTION_TEXT = "1. FIRST\nAlpha section.\n\n2. SECOND\nBeta section.\n\n3. THIRD\nGamma section."
 
 
 def test_preserve_policy_fences_table_gaps_to_their_enclosing_section():
@@ -186,9 +174,7 @@ def test_preserve_policy_fences_table_gaps_to_their_enclosing_section():
         (34, 44),
         (44, len(text)),
     ]
-    assert not any(
-        chunk.start < section_boundary < chunk.end for chunk in result
-    )
+    assert not any(chunk.start < section_boundary < chunk.end for chunk in result)
     assert_chunk_invariants(text, result, max_chars=100)
 
 
@@ -234,11 +220,7 @@ def test_pack_siblings_is_explicit_and_never_bisects_a_heading():
     )
     assert [(chunk.start, chunk.end) for chunk in packed] == [(0, 50), (50, 73)]
     heading_starts = [0, SECTION_TEXT.index("2. SECOND"), SECTION_TEXT.index("3. THIRD")]
-    assert all(
-        chunk.end in heading_starts[1:] + [len(SECTION_TEXT)]
-        for chunk in packed
-    )
-
+    assert all(chunk.end in heading_starts[1:] + [len(SECTION_TEXT)] for chunk in packed)
 
 
 def test_boundary_opt_out_makes_container_policies_plan_identical_chunks():
@@ -277,9 +259,11 @@ def test_boundary_opt_out_makes_container_policies_plan_identical_chunks():
 
 def test_preserve_policy_drops_overlap_at_complete_protected_sections():
     result = chunks(SECTION_TEXT, max_chars=30, overlap_chars=5)
-    assert [
-        (chunk.start, chunk.new_content_start, chunk.end) for chunk in result
-    ] == [(0, 0, 25), (25, 25, 50), (50, 50, 73)]
+    assert [(chunk.start, chunk.new_content_start, chunk.end) for chunk in result] == [
+        (0, 0, 25),
+        (25, 25, 50),
+        (50, 50, 73),
+    ]
     assert_chunk_invariants(SECTION_TEXT, result, max_chars=30)
 
 

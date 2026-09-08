@@ -12,8 +12,9 @@ import json
 import math
 import re
 from collections import Counter
+from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any
 
 FIXTURE_ROOT = Path(__file__).resolve().parents[4] / "test_data" / "lexnlp" / "nlp" / "en" / "sota_segmentation"
 STRUCTURAL_KINDS = ("section", "clause", "list_item")
@@ -58,7 +59,7 @@ def assert_lossless_hierarchy(document: Any) -> None:
             assert segment_id not in seen
             seen.add(segment_id)
         assert 0 <= node.start <= node.end <= len(source)
-        assert node.text(source) == source[node.start:node.end]
+        assert node.text(source) == source[node.start : node.end]
         children = tuple(node.children)
         if not children:
             return
@@ -141,8 +142,14 @@ def prf(counts: tuple[int, int, int]) -> dict[str, float | int]:
     precision = tp / (tp + fp) if tp + fp else 1.0
     recall = tp / (tp + fn) if tp + fn else 1.0
     f1 = 2 * precision * recall / (precision + recall) if precision + recall else 0.0
-    return {"true_positive": tp, "false_positive": fp, "false_negative": fn,
-            "precision": precision, "recall": recall, "f1": f1}
+    return {
+        "true_positive": tp,
+        "false_positive": fp,
+        "false_negative": fn,
+        "precision": precision,
+        "recall": recall,
+        "f1": f1,
+    }
 
 
 def anchor_recall(text: str, gold_items: Sequence[Mapping[str, Any]], document: Any) -> tuple[int, int]:
@@ -153,7 +160,8 @@ def anchor_recall(text: str, gold_items: Sequence[Mapping[str, Any]], document: 
         label = normalise_label(item.get("label"))
         found += any(
             kind_value(segment.kind) == str(item["kind"])
-            and segment.start <= start and segment.end >= end
+            and segment.start <= start
+            and segment.end >= end
             and (label is None or normalise_label(segment.label) == label)
             for segment in segments
         )
@@ -180,12 +188,9 @@ def deterministic_sentence_spans(text: str) -> list[tuple[int, int]]:
         local = text[begin:finish]
         cursor = 0
         for match in _SENTENCE_END.finditer(local):
-            candidate = local[cursor:match.end()]
+            candidate = local[cursor : match.end()]
             stripped_candidate = candidate.strip()
-            if (
-                _PROTECTED_PERIOD.search(stripped_candidate)
-                or _OUTLINE_MARKER_PERIOD.fullmatch(stripped_candidate)
-            ):
+            if _PROTECTED_PERIOD.search(stripped_candidate) or _OUTLINE_MARKER_PERIOD.fullmatch(stripped_candidate):
                 continue
             start = begin + cursor
             while start < begin + match.end() and text[start].isspace():

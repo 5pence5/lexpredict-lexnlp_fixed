@@ -24,7 +24,7 @@ class TestQuotedDefinedTermsAreNotPersons(TestCase):
 
     def test_a_quoted_multi_word_party_name_is_kept(self):
         """A real party name is usually quoted too, so only single words are dropped."""
-        self.assertFalse(_is_quoted_defined_term('Acme Holdings', 'between "Acme Holdings" and others'))
+        self.assertFalse(_is_quoted_defined_term("Acme Holdings", 'between "Acme Holdings" and others'))
 
     def test_single_word_only_ever_quoted_is_a_defined_term(self):
         self.assertTrue(_is_quoted_defined_term("Employee", 'GERALD GREENWALD (the "Employee").'))

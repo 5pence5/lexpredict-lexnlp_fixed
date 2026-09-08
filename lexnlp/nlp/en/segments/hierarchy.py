@@ -12,14 +12,13 @@ import hashlib
 import re
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass, replace
-from enum import Enum
-from typing import TypeAlias
+from enum import Enum, StrEnum
 
 HIERARCHY_SCHEMA_VERSION = 1
 MAX_HIERARCHY_DEPTH = 128
 
 
-class SegmentKind(str, Enum):
+class SegmentKind(StrEnum):
     DOCUMENT = "document"
     SECTION = "section"
     CLAUSE = "clause"
@@ -31,21 +30,21 @@ class SegmentKind(str, Enum):
     SEPARATOR = "separator"
 
 
-class StructuralMode(str, Enum):
+class StructuralMode(StrEnum):
     REPLACE = "replace"
     AUGMENT = "augment"
 
 
-class StructureProfile(str, Enum):
+class StructureProfile(StrEnum):
     CONSERVATIVE = "conservative"
     STATUTE = "statute"
 
 
-SegmentAttribute: TypeAlias = tuple[str, str]
-SentenceSpan: TypeAlias = tuple[int, int] | tuple[int, int, str]
-SentenceSegmenter: TypeAlias = Callable[[str], Iterable[SentenceSpan]]
-ParagraphSpan: TypeAlias = tuple[int, int] | tuple[int, int, str]
-ParagraphSegmenter: TypeAlias = Callable[[str], Iterable[ParagraphSpan]]
+type SegmentAttribute = tuple[str, str]
+type SentenceSpan = tuple[int, int] | tuple[int, int, str]
+type SentenceSegmenter = Callable[[str], Iterable[SentenceSpan]]
+type ParagraphSpan = tuple[int, int] | tuple[int, int, str]
+type ParagraphSegmenter = Callable[[str], Iterable[ParagraphSpan]]
 
 
 def _enum(value: object, enum_type: type[Enum], name: str):
@@ -121,10 +120,7 @@ class HierarchyManifest:
         )
         _integer(self.schema_version, "schema_version", minimum=1)
         if self.tree_sha256 is not None:
-            if (
-                not isinstance(self.tree_sha256, str)
-                or re.fullmatch(r"[0-9a-f]{64}", self.tree_sha256) is None
-            ):
+            if not isinstance(self.tree_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", self.tree_sha256) is None:
                 raise ValueError("tree_sha256 must be a lowercase SHA-256 digest")
 
 
@@ -141,7 +137,7 @@ class Segment:
     kind: SegmentKind
     start: int
     end: int
-    children: tuple["Segment", ...] = ()
+    children: tuple[Segment, ...] = ()
     label: str | None = None
     level: int | None = None
     attributes: tuple[SegmentAttribute, ...] = ()
@@ -179,9 +175,9 @@ class Segment:
             raise TypeError("source must be a string")
         if self.end > len(source):
             raise ValueError("segment lies outside source")
-        return source[self.start:self.end]
+        return source[self.start : self.end]
 
-    def walk(self, kind: SegmentKind | str | None = None) -> Iterator["Segment"]:
+    def walk(self, kind: SegmentKind | str | None = None) -> Iterator[Segment]:
         wanted = None if kind is None else _enum(kind, SegmentKind, "kind")
         stack = [self]
         while stack:
@@ -190,7 +186,7 @@ class Segment:
                 yield node
             stack.extend(reversed(node.children))
 
-    def leaves(self) -> Iterator["Segment"]:
+    def leaves(self) -> Iterator[Segment]:
         stack = [self]
         while stack:
             node = stack.pop()
@@ -231,7 +227,7 @@ class StructuralSpan:
         object.__setattr__(self, "attributes", _attributes(self.attributes))
 
 
-def _digest_value(digest: "hashlib._Hash", value: object) -> None:
+def _digest_value(digest: hashlib._Hash, value: object) -> None:
     """Frame supported scalar types without cross-type or sentinel collisions."""
     if value is None:
         type_tag = b"N"
@@ -288,9 +284,7 @@ def _validate_hierarchy(source: str, root: Segment) -> None:
     while stack:
         node, depth = stack.pop()
         if depth > MAX_HIERARCHY_DEPTH:
-            raise ValueError(
-                f"hierarchy exceeds MAX_HIERARCHY_DEPTH={MAX_HIERARCHY_DEPTH}"
-            )
+            raise ValueError(f"hierarchy exceeds MAX_HIERARCHY_DEPTH={MAX_HIERARCHY_DEPTH}")
         if node.end > len(source):
             raise ValueError(f"{node.segment_id} lies outside source")
         if node.segment_id in seen:
@@ -300,16 +294,12 @@ def _validate_hierarchy(source: str, root: Segment) -> None:
             cursor = node.start
             for child in node.children:
                 if child.start != cursor:
-                    raise ValueError(
-                        f"children of {node.segment_id} do not exactly partition source"
-                    )
+                    raise ValueError(f"children of {node.segment_id} do not exactly partition source")
                 if child.end > node.end:
                     raise ValueError(f"child {child.segment_id} exceeds its parent")
                 cursor = child.end
             if cursor != node.end:
-                raise ValueError(
-                    f"children of {node.segment_id} do not exactly partition source"
-                )
+                raise ValueError(f"children of {node.segment_id} do not exactly partition source")
             for child in reversed(node.children):
                 stack.append((child, depth + 1))
 
@@ -330,9 +320,7 @@ class DocumentHierarchy:
         _validate_hierarchy(self.source, self.root)
         realised = _tree_sha256(self.root)
         if self.manifest.tree_sha256 is None:
-            object.__setattr__(
-                self, "manifest", replace(self.manifest, tree_sha256=realised)
-            )
+            object.__setattr__(self, "manifest", replace(self.manifest, tree_sha256=realised))
         elif self.manifest.tree_sha256 != realised:
             raise ValueError("hierarchy tree does not match manifest tree_sha256")
         if self.reconstruct() != self.source:
@@ -345,7 +333,7 @@ class DocumentHierarchy:
         children: Iterable[Segment],
         *,
         manifest: HierarchyManifest = _CALLER_TREE_MANIFEST,
-    ) -> "DocumentHierarchy":
+    ) -> DocumentHierarchy:
         if not isinstance(source, str):
             raise TypeError("source must be a string")
         materialised = tuple(children)
@@ -400,13 +388,11 @@ class _NumericCandidate:
 @dataclass(slots=True)
 class _SpanNode:
     span: StructuralSpan
-    children: list["_SpanNode"]
+    children: list[_SpanNode]
 
 
 _NEWLINE_AT_END_RE = re.compile(r"(?:\r\n|\n\r|\r|\n)$")
-_BLANK_LINE_RE = re.compile(
-    r"(?:(?:[ \t]*)(?:\r\n|\n\r|\r(?!\n)|\n(?!\r))){2,}"
-)
+_BLANK_LINE_RE = re.compile(r"(?:(?:[ \t]*)(?:\r\n|\n\r|\r(?!\n)|\n(?!\r))){2,}")
 _PAGE_MARKER_RE = re.compile(
     r"^[ \t]*(?:<PAGE>(?:[ \t]+\d+)?|PAGE[ \t]+\d+(?:[ \t]+OF[ \t]+\d+)?)[ \t]*(?:\r\n|\n\r|\r|\n|$)",
     re.IGNORECASE | re.MULTILINE,
@@ -439,15 +425,11 @@ def _split_lines(text: str) -> list[_Line]:
         newline = _NEWLINE_AT_END_RE.search(raw)
         content = raw[: newline.start()] if newline else raw
         end = offset + len(raw)
-        result.append(
-            _Line(index, offset, offset + len(content), end, content, content.strip())
-        )
+        result.append(_Line(index, offset, offset + len(content), end, content, content.strip()))
         offset = end
     if offset < len(text):
         content = text[offset:]
-        result.append(
-            _Line(len(result), offset, len(text), len(text), content, content.strip())
-        )
+        result.append(_Line(len(result), offset, len(text), len(text), content, content.strip()))
     return result
 
 
@@ -481,11 +463,7 @@ def _delimited_blocks(
     weaker evidence and is promoted only by an adjacent row with the same
     delimiter and semantic cell count, including a strong Markdown-style row.
     """
-    table_lines = {
-        line.index
-        for line in lines
-        if line.content.count("|") >= 2 or line.content.count("\t") >= 2
-    }
+    table_lines = {line.index for line in lines if line.content.count("|") >= 2 or line.content.count("\t") >= 2}
     row_shapes = tuple(_delimited_row_shape(line) for line in lines)
     index = 0
     while index < len(lines):
@@ -498,9 +476,7 @@ def _delimited_blocks(
         while index < len(lines) and row_shapes[index] == shape:
             index += 1
         if index - run_start >= 2:
-            table_lines.update(
-                lines[position].index for position in range(run_start, index)
-            )
+            table_lines.update(lines[position].index for position in range(run_start, index))
 
     blocks: list[tuple[int, int]] = []
     index = 0
@@ -517,10 +493,7 @@ def _delimited_blocks(
 
 
 def _number_parts(number: str) -> tuple[str, ...]:
-    return tuple(
-        part.casefold()
-        for part in re.findall(r"\d+|[A-Za-z]+", number)
-    )
+    return tuple(part.casefold() for part in re.findall(r"\d+|[A-Za-z]+", number))
 
 
 def _is_upper_heading(title: str) -> bool:
@@ -562,9 +535,7 @@ def _sequence_numbered_heading_indices(
         if candidate.parts:
             parent_index = index_by_parts.get(candidate.parts[:-1])
             if parent_index is not None:
-                children_by_index.setdefault(parent_index, []).append(
-                    candidate.line_index
-                )
+                children_by_index.setdefault(parent_index, []).append(candidate.line_index)
         index_by_parts[candidate.parts] = candidate.line_index
         if not candidate.parts:
             continue
@@ -573,11 +544,7 @@ def _sequence_numbered_heading_indices(
             continue
         parent = candidate.parts[:-1]
         previous = last_by_parent.get(parent)
-        if (
-            previous is not None
-            and previous[0][0] == current[0]
-            and current[1] == previous[0][1] + 1
-        ):
+        if previous is not None and previous[0][0] == current[0] and current[1] == previous[0][1] + 1:
             promoted.add(previous[1])
             promoted.add(candidate.line_index)
         last_by_parent[parent] = (current, candidate.line_index)
@@ -629,11 +596,7 @@ def _heading_candidates(
                 )
             )
 
-    promoted = (
-        _sequence_numbered_heading_indices(numeric)
-        if profile is StructureProfile.STATUTE
-        else set()
-    )
+    promoted = _sequence_numbered_heading_indices(numeric) if profile is StructureProfile.STATUTE else set()
     headings: list[_Heading] = []
     heading_lines: set[int] = set()
 
@@ -807,10 +770,7 @@ def _outline_spans(
     for line in lines:
         while active_sections and active_sections[-1].end <= line.start:
             active_sections.pop()
-        while (
-            next_section < len(sorted_sections)
-            and sorted_sections[next_section].start <= line.start
-        ):
+        while next_section < len(sorted_sections) and sorted_sections[next_section].start <= line.start:
             section = sorted_sections[next_section]
             next_section += 1
             while active_sections and active_sections[-1].end <= section.start:
@@ -861,9 +821,7 @@ def _outline_spans(
             )
 
     result: list[StructuralSpan] = []
-    parent_ends = {
-        (span.start, span.end): span.end for span in sections
-    }
+    parent_ends = {(span.start, span.end): span.end for span in sections}
     for parent_key, markers in grouped.items():
         limit = len(text) if parent_key is None else parent_ends[parent_key]
         ends = [limit] * len(markers)
@@ -876,7 +834,7 @@ def _outline_spans(
             stack.append(index)
         while stack:
             ends[stack.pop()] = limit
-        for marker, end in zip(markers, ends):
+        for marker, end in zip(markers, ends, strict=True):
             marker_start, line, kind, label_value, level = marker
             if end > marker_start:
                 result.append(
@@ -896,10 +854,7 @@ def _outline_spans(
     if section_starts:
         for index, span in enumerate(result):
             position = bisect.bisect_right(section_starts, span.start)
-            if (
-                position < len(section_starts)
-                and section_starts[position] < span.end
-            ):
+            if position < len(section_starts) and section_starts[position] < span.end:
                 result[index] = replace(
                     span,
                     end=section_starts[position],
@@ -924,10 +879,7 @@ def _table_spans(
     for start, end in blocks:
         while active and active[-1].end <= start:
             active.pop()
-        while (
-            container_index < len(ordered_containers)
-            and ordered_containers[container_index].start <= start
-        ):
+        while container_index < len(ordered_containers) and ordered_containers[container_index].start <= start:
             candidate = ordered_containers[container_index]
             container_index += 1
             while active and candidate.start >= active[-1].end:
@@ -937,11 +889,7 @@ def _table_spans(
             active.append(candidate)
         while active and active[-1].end < end:
             active.pop()
-        parent = (
-            active[-1]
-            if active and active[-1].start <= start and end <= active[-1].end
-            else None
-        )
+        parent = active[-1] if active and active[-1].start <= start and end <= active[-1].end else None
         level = ((parent.level or 0) + 1) if parent else 1
         result.append(
             StructuralSpan(
@@ -991,9 +939,7 @@ def _validate_structural_spans(
         if span.end > source_length:
             raise ValueError("structural span lies outside source")
 
-    ordered = tuple(
-        sorted(materialised, key=lambda span: (span.start, -span.end, span.kind.value))
-    )
+    ordered = tuple(sorted(materialised, key=lambda span: (span.start, -span.end, span.kind.value)))
     stack: list[StructuralSpan] = []
     seen_ranges: set[tuple[int, int]] = set()
     for span in ordered:
@@ -1009,9 +955,7 @@ def _validate_structural_spans(
                 f"{stack[-1].start}:{stack[-1].end} and {span.start}:{span.end}"
             )
         if len(stack) + 1 > MAX_HIERARCHY_DEPTH:
-            raise ValueError(
-                f"structural spans exceed MAX_HIERARCHY_DEPTH={MAX_HIERARCHY_DEPTH}"
-            )
+            raise ValueError(f"structural spans exceed MAX_HIERARCHY_DEPTH={MAX_HIERARCHY_DEPTH}")
         stack.append(span)
     return ordered
 
@@ -1022,11 +966,7 @@ def _merge_augmented_span(
 ) -> StructuralSpan:
     """Merge exact-range evidence without losing built-in detector metadata."""
 
-    if (
-        builtin.start != external.start
-        or builtin.end != external.end
-        or builtin.kind is not external.kind
-    ):
+    if builtin.start != external.start or builtin.end != external.end or builtin.kind is not external.kind:
         raise ValueError("augmented spans must have the same range and kind")
 
     attributes = list(builtin.attributes)
@@ -1057,9 +997,7 @@ def _augment_structural_spans(
     """Combine caller evidence with built-ins, reconciling exact matches once."""
 
     result = list(builtins)
-    builtin_by_range = {
-        (span.start, span.end): index for index, span in enumerate(builtins)
-    }
+    builtin_by_range = {(span.start, span.end): index for index, span in enumerate(builtins)}
     for caller_span in external:
         key = (caller_span.start, caller_span.end)
         builtin_index = builtin_by_range.get(key)
@@ -1136,10 +1074,7 @@ def _prediction_spans(
 
 
 def _separator_intervals(text: str) -> tuple[tuple[int, int], ...]:
-    raw = [
-        match.span() for expression in (_BLANK_LINE_RE, _PAGE_MARKER_RE)
-        for match in expression.finditer(text)
-    ]
+    raw = [match.span() for expression in (_BLANK_LINE_RE, _PAGE_MARKER_RE) for match in expression.finditer(text)]
     if not raw:
         return ()
     raw.sort()
@@ -1349,9 +1284,7 @@ def segment_document(
 
     if not supplied:
         if structural_backend_id is not None:
-            raise ValueError(
-                "structural_backend_id is only valid when structural_spans are supplied"
-            )
+            raise ValueError("structural_backend_id is only valid when structural_spans are supplied")
         realised_spans = _builtin_structural_spans(text, profile)
         effective_mode = StructuralMode.REPLACE
         structural_id = f"builtin.legal_structure.v1:{profile.value}"
@@ -1367,25 +1300,15 @@ def segment_document(
         if mode is StructuralMode.AUGMENT:
             builtins = _builtin_structural_spans(text, profile)
             realised_spans = _augment_structural_spans(builtins, external)
-            structural_id = (
-                f"builtin.legal_structure.v1:{profile.value}+{external_id}"
-            )
+            structural_id = f"builtin.legal_structure.v1:{profile.value}+{external_id}"
         else:
             realised_spans = external
             structural_id = external_id
 
     validated = _validate_structural_spans(realised_spans, len(text))
     forest = _span_forest(validated)
-    paragraph_backend = (
-        _default_paragraph_spans
-        if paragraph_segmenter is None
-        else paragraph_segmenter
-    )
-    sentence_backend = (
-        _legacy_sentence_segmenter
-        if sentence_segmenter is None
-        else sentence_segmenter
-    )
+    paragraph_backend = _default_paragraph_spans if paragraph_segmenter is None else paragraph_segmenter
+    sentence_backend = _legacy_sentence_segmenter if sentence_segmenter is None else sentence_segmenter
     paragraph_id = _callable_id(
         paragraph_segmenter,
         paragraph_backend_id,
@@ -1444,10 +1367,10 @@ def iter_document_segments(
 
 
 __all__ = [
-    "DocumentHierarchy",
     "HIERARCHY_SCHEMA_VERSION",
-    "HierarchyManifest",
     "MAX_HIERARCHY_DEPTH",
+    "DocumentHierarchy",
+    "HierarchyManifest",
     "ParagraphSegmenter",
     "ParagraphSpan",
     "Segment",
@@ -1455,8 +1378,8 @@ __all__ = [
     "SegmentKind",
     "SentenceSegmenter",
     "SentenceSpan",
-    "StructuralSpan",
     "StructuralMode",
+    "StructuralSpan",
     "StructureProfile",
     "iter_document_segments",
     "segment_document",

@@ -100,10 +100,7 @@ class TestRegulationsParserDataFrameInjection(TestCase):
 
     def test_paragraph_leading_via_parser(self):
         """The parser surfaces paragraph-leading citations as RegulationAnnotations."""
-        text = (
-            "Aplica-se o § 2º do art. 14 da norma. "
-            "Bem como inciso II do art. 5º e alínea a do art. 12."
-        )
+        text = "Aplica-se o § 2º do art. 14 da norma. Bem como inciso II do art. 5º e alínea a do art. 12."
         regs = list(parser.parse(text))
         names = [r.name for r in regs]
         self.assertIn("§ 2º do art. 14", names)

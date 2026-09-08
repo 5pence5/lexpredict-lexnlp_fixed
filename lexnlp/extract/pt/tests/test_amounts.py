@@ -42,9 +42,7 @@ class TestTextToNumber(TestCase):
         self.assertEqual(Decimal(1000), text_to_number("mil"))
         self.assertEqual(Decimal(1250), text_to_number("mil duzentos e cinquenta"))
         self.assertEqual(Decimal(2500), text_to_number("dois mil e quinhentos"))
-        self.assertEqual(
-            Decimal(5430), text_to_number("cinco mil quatrocentos e trinta")
-        )
+        self.assertEqual(Decimal(5430), text_to_number("cinco mil quatrocentos e trinta"))
 
     def test_millions(self):
         self.assertEqual(Decimal(1_000_000), text_to_number("um milhão"))

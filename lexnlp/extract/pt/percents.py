@@ -39,9 +39,7 @@ def _parse_pt_number(raw: str) -> Decimal:
     return Decimal(raw.replace(".", "").replace(",", "."))
 
 
-def get_percent_annotations(
-    text: str, float_digits: int = 4
-) -> Iterator[PercentAnnotation]:
+def get_percent_annotations(text: str, float_digits: int = 4) -> Iterator[PercentAnnotation]:
     """Yield :class:`PercentAnnotation` for every percent expression in *text*."""
     for match in PERCENT_PTN_RE.finditer(text):
         amount = _parse_pt_number(match.group("num"))
@@ -73,9 +71,7 @@ def get_percents(text: str, float_digits: int = 4) -> Iterator[dict]:
         }
 
 
-def get_percent_annotation_list(
-    text: str, float_digits: int = 4
-) -> list[PercentAnnotation]:
+def get_percent_annotation_list(text: str, float_digits: int = 4) -> list[PercentAnnotation]:
     """Return all percent annotations in *text* as a list."""
     return list(get_percent_annotations(text, float_digits))
 

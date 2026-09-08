@@ -97,9 +97,7 @@ class TestParseArgs:
 
 
 class TestEnsureTagDownloaded:
-    def test_returns_catalog_path_when_present(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_returns_catalog_path_when_present(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         model = tmp_path / "model.cloudpickle"
         model.write_bytes(b"ok")
         downloads: list[tuple[str, bool]] = []
@@ -112,9 +110,7 @@ class TestEnsureTagDownloaded:
         assert script_mod.ensure_tag_downloaded("pipeline/is-contract/0.1") == model
         assert downloads == []
 
-    def test_downloads_when_catalog_misses(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_downloads_when_catalog_misses(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         model = tmp_path / "model.cloudpickle"
         model.write_bytes(b"ok")
         calls = {"n": 0}
@@ -137,9 +133,7 @@ class TestEnsureTagDownloaded:
 
 
 class TestRunQualityGate:
-    def test_includes_baseline_metrics_when_file_exists(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_includes_baseline_metrics_when_file_exists(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         metrics = tmp_path / "metrics.json"
         metrics.write_text("{}", encoding="utf-8")
         fixture = tmp_path / "fix.csv"
@@ -176,9 +170,7 @@ class TestRunQualityGate:
         assert "--max-accuracy-regression" in cmd and "0.01" in cmd
         assert "--max-f1-regression" in cmd and "0.02" in cmd
 
-    def test_omits_baseline_metrics_when_missing(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_omits_baseline_metrics_when_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         metrics = tmp_path / "missing.json"
         seen: dict[str, object] = {}
 
@@ -300,9 +292,7 @@ class TestMain:
         with pytest.raises(ValueError, match="must differ"):
             script_mod.main(["--source-tag", "pipeline/same/1", "--target-tag", "pipeline/same/1"])
 
-    def test_existing_destination_without_force_raises(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_existing_destination_without_force_raises(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         source = tmp_path / "model.cloudpickle"
         source.write_bytes(b"src")
         catalog = tmp_path / "catalog"

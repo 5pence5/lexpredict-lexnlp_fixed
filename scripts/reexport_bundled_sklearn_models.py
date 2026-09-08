@@ -290,11 +290,7 @@ def main(argv: Sequence[str]) -> int:
                 target = reexport_layered_definition_models_skops(path)
             else:
                 target = _reexport_single_skops(path)
-            after = (
-                0
-                if target.suffix.lower() == ".skops"
-                else legacy_warning_count_for_load(target)
-            )
+            after = 0 if target.suffix.lower() == ".skops" else legacy_warning_count_for_load(target)
             extra = ""
             if args.remove_legacy:
                 if target.exists():
@@ -302,10 +298,7 @@ def main(argv: Sequence[str]) -> int:
                     extra = " removed-legacy=yes"
                 else:
                     extra = " removed-legacy=SKIPPED (target missing)"
-            print(
-                f"reexport: {path} -> {target} legacy_warnings before={before} "
-                f"after={after}{extra}"
-            )
+            print(f"reexport: {path} -> {target} legacy_warnings before={before} after={after}{extra}")
         else:
             if path.name == "definition_model_layered.pickle.gzip":
                 reexport_layered_definition_models_pickle(path)

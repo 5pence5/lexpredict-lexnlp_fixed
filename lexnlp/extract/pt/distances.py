@@ -43,23 +43,34 @@ DISTANCE_SYMBOL_MAP: dict[str, str] = {
 # pt-BR word -> canonical English unit name. Both singular and plural
 # forms are accepted.
 DISTANCE_TOKEN_MAP: dict[str, str] = {
-    "quilômetros": "kilometer", "quilometros": "kilometer",
-    "quilômetro": "kilometer", "quilometro": "kilometer",
-    "metros": "meter", "metro": "meter",
-    "centímetros": "centimeter", "centimetros": "centimeter",
-    "centímetro": "centimeter", "centimetro": "centimeter",
-    "milímetros": "millimeter", "milimetros": "millimeter",
-    "milímetro": "millimeter", "milimetro": "millimeter",
-    "milhas": "mile", "milha": "mile",
-    "milhas náuticas": "nautical_mile", "milha náutica": "nautical_mile",
-    "jardas": "yard", "jarda": "yard",
-    "pés": "foot", "pes": "foot", "pé": "foot",
-    "polegadas": "inch", "polegada": "inch",
+    "quilômetros": "kilometer",
+    "quilometros": "kilometer",
+    "quilômetro": "kilometer",
+    "quilometro": "kilometer",
+    "metros": "meter",
+    "metro": "meter",
+    "centímetros": "centimeter",
+    "centimetros": "centimeter",
+    "centímetro": "centimeter",
+    "centimetro": "centimeter",
+    "milímetros": "millimeter",
+    "milimetros": "millimeter",
+    "milímetro": "millimeter",
+    "milimetro": "millimeter",
+    "milhas": "mile",
+    "milha": "mile",
+    "milhas náuticas": "nautical_mile",
+    "milha náutica": "nautical_mile",
+    "jardas": "yard",
+    "jarda": "yard",
+    "pés": "foot",
+    "pes": "foot",
+    "pé": "foot",
+    "polegadas": "inch",
+    "polegada": "inch",
 }
 
-_TOKEN_PART = "|".join(
-    re.escape(t) for t in sorted(DISTANCE_TOKEN_MAP, key=len, reverse=True)
-)
+_TOKEN_PART = "|".join(re.escape(t) for t in sorted(DISTANCE_TOKEN_MAP, key=len, reverse=True))
 _SYMBOL_PART = "|".join(re.escape(s) for s in DISTANCE_SYMBOL_MAP)
 
 DISTANCE_PTN_RE = re.compile(
@@ -75,9 +86,7 @@ def _resolve_unit(token: str) -> str:
     return DISTANCE_TOKEN_MAP.get(lowered) or DISTANCE_SYMBOL_MAP.get(lowered, lowered)
 
 
-def get_distance_annotations(
-    text: str, float_digits: int = 4
-) -> Iterator[DistanceAnnotation]:
+def get_distance_annotations(text: str, float_digits: int = 4) -> Iterator[DistanceAnnotation]:
     """Yield :class:`DistanceAnnotation` for every distance in *text*."""
     for match in DISTANCE_PTN_RE.finditer(text):
         amount = _parse_pt_number(match.group("num"))
@@ -103,9 +112,7 @@ def get_distances(
             yield ant.amount, ant.distance_type
 
 
-def get_distance_annotation_list(
-    text: str, float_digits: int = 4
-) -> list[DistanceAnnotation]:
+def get_distance_annotation_list(text: str, float_digits: int = 4) -> list[DistanceAnnotation]:
     """Return all distance annotations in *text* as a list."""
     return list(get_distance_annotations(text, float_digits))
 

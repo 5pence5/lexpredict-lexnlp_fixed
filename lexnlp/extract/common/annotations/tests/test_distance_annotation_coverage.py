@@ -24,9 +24,7 @@ class TestDistanceAnnotationCoverage:
 
     def test_get_dictionary_values_defaults(self) -> None:
         ann = DistanceAnnotation(coords=(0, 3))
-        assert ann.get_dictionary_values() == {
-            "tags": {"Extracted Entity Value": "", "Extracted Entity Text": None}
-        }
+        assert ann.get_dictionary_values() == {"tags": {"Extracted Entity Value": "", "Extracted Entity Text": None}}
 
     def test_to_dictionary_merges_tags(self) -> None:
         ann = DistanceAnnotation(
@@ -42,7 +40,5 @@ class TestDistanceAnnotationCoverage:
         assert d["tags"]["Extracted Entity Text"] == "500 miles"
 
     def test_get_cite_value_parts_full(self) -> None:
-        ann = DistanceAnnotation(
-            coords=(0, 6), amount=Decimal("101"), distance_type="km"
-        )
+        ann = DistanceAnnotation(coords=(0, 6), amount=Decimal("101"), distance_type="km")
         assert ann.get_cite_value_parts() == ["101", "km"]

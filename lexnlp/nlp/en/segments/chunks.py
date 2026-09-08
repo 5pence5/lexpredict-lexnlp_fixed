@@ -8,8 +8,7 @@ import json
 import re
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from dataclasses import dataclass
-from enum import Enum
-from typing import TypeAlias
+from enum import Enum, StrEnum
 
 from lexnlp.nlp.en.segments.hierarchy import (
     DocumentHierarchy,
@@ -28,15 +27,15 @@ DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_INPUT_BYTES = 16_000_000
 DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS = 100_000
 CHUNKING_SCHEMA_VERSION = 2
 CHUNKING_SERIALIZER_VERSION = 1
-TokenCounter: TypeAlias = Callable[[str], int]
+type TokenCounter = Callable[[str], int]
 
 
-class ContainerPolicy(str, Enum):
+class ContainerPolicy(StrEnum):
     PRESERVE = "preserve"
     PACK_SIBLINGS = "pack_siblings"
 
 
-class TokenCounterPolicy(str, Enum):
+class TokenCounterPolicy(StrEnum):
     """Declared capabilities that select the token endpoint search algorithm."""
 
     MONOTONIC = "monotonic"
@@ -50,10 +49,7 @@ class TokenSearchLimitExceeded(RuntimeError):
         self.envelope = envelope
         self.observed = observed
         self.maximum = maximum
-        super().__init__(
-            f"arbitrary token search {envelope} envelope exceeded: "
-            f"{observed} > {maximum}"
-        )
+        super().__init__(f"arbitrary token search {envelope} envelope exceeded: {observed} > {maximum}")
 
 
 def _integer(value: object, name: str, *, minimum: int | None = None) -> int:
@@ -76,7 +72,7 @@ def _digest(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 
-def _digest_value(digest: "hashlib._Hash", value: object) -> None:
+def _digest_value(digest: hashlib._Hash, value: object) -> None:
     """Frame supported scalar types without cross-type or sentinel collisions."""
     if value is None:
         type_tag = b"N"
@@ -136,14 +132,9 @@ class ChunkingManifest:
     serializer_version: int = CHUNKING_SERIALIZER_VERSION
 
     def __post_init__(self) -> None:
-        if (
-            not isinstance(self.source_sha256, str)
-            or re.fullmatch(r"[0-9a-f]{64}", self.source_sha256) is None
-        ):
+        if not isinstance(self.source_sha256, str) or re.fullmatch(r"[0-9a-f]{64}", self.source_sha256) is None:
             raise ValueError("source_sha256 must be a lowercase SHA-256 digest")
-        if self.document_id is not None and (
-            not isinstance(self.document_id, str) or not self.document_id
-        ):
+        if self.document_id is not None and (not isinstance(self.document_id, str) or not self.document_id):
             raise ValueError("document_id must be None or a non-empty string")
         if self.unit_kind not in {"characters", "tokens"}:
             raise ValueError("unit_kind must be 'characters' or 'tokens'")
@@ -170,15 +161,10 @@ class ChunkingManifest:
             self.token_search_max_steps,
         )
         if self.unit_kind == "tokens":
-            if (
-                not isinstance(self.token_counter_id, str)
-                or not self.token_counter_id.strip()
-            ):
+            if not isinstance(self.token_counter_id, str) or not self.token_counter_id.strip():
                 raise ValueError("token mode requires a non-empty token_counter_id")
             if self.token_counter_policy is None:
-                raise ValueError(
-                    "token mode requires an explicit token_counter_policy"
-                )
+                raise ValueError("token mode requires an explicit token_counter_policy")
             policy = _enum(
                 self.token_counter_policy,
                 TokenCounterPolicy,
@@ -193,9 +179,7 @@ class ChunkingManifest:
                 ):
                     _integer(getattr(self, name), name, minimum=1)
             elif any(value is not None for value in search_limits):
-                raise ValueError(
-                    "token search envelopes are only valid for arbitrary counters"
-                )
+                raise ValueError("token search envelopes are only valid for arbitrary counters")
         elif (
             self.token_counter_id is not None
             or self.token_counter_policy is not None
@@ -230,11 +214,7 @@ class ChunkingManifest:
             "serializer_version": self.serializer_version,
             "source_sha256": self.source_sha256,
             "token_counter_id": self.token_counter_id,
-            "token_counter_policy": (
-                None
-                if self.token_counter_policy is None
-                else self.token_counter_policy.value
-            ),
+            "token_counter_policy": (None if self.token_counter_policy is None else self.token_counter_policy.value),
             "token_search_max_calls": self.token_search_max_calls,
             "token_search_max_input_bytes": self.token_search_max_input_bytes,
             "token_search_max_steps": self.token_search_max_steps,
@@ -279,7 +259,7 @@ class SegmentReference:
         object.__setattr__(self, "attributes", _attributes(self.attributes))
 
     @classmethod
-    def from_segment(cls, segment: Segment) -> "SegmentReference":
+    def from_segment(cls, segment: Segment) -> SegmentReference:
         if not isinstance(segment, Segment):
             raise TypeError("segment must be a Segment")
         return cls(
@@ -297,11 +277,7 @@ def _labels(
     segments: Sequence[SegmentReference],
     kind: SegmentKind,
 ) -> tuple[str, ...]:
-    return tuple(
-        reference.label
-        for reference in segments
-        if reference.kind is kind and reference.label is not None
-    )
+    return tuple(reference.label for reference in segments if reference.kind is kind and reference.label is not None)
 
 
 @dataclass(frozen=True, slots=True)
@@ -486,8 +462,7 @@ class DocumentChunk:
     @property
     def chunk_id(self) -> str:
         return (
-            f"{self.manifest.source_id}:manifest:{self.manifest.manifest_id}"
-            f":chunk:sha256:{self.chunk_metadata_sha256}"
+            f"{self.manifest.source_id}:manifest:{self.manifest.manifest_id}:chunk:sha256:{self.chunk_metadata_sha256}"
         )
 
     @property
@@ -543,16 +518,11 @@ class _HierarchyIndex:
                             continue
                         if node.start < heading_end <= node.end:
                             heading_intervals.add((node.start, heading_end))
-                            structure_ends.setdefault(node.start, set()).add(
-                                heading_end
-                            )
+                            structure_ends.setdefault(node.start, set()).add(heading_end)
             stack.extend(reversed(node.children))
         self.boundaries = tuple(sorted(boundaries))
         self.headings = _HeadingIndex(heading_intervals)
-        self._structure_ends = {
-            start: tuple(sorted(ends))
-            for start, ends in structure_ends.items()
-        }
+        self._structure_ends = {start: tuple(sorted(ends)) for start, ends in structure_ends.items()}
 
     def structure_ends_at(self, start: int) -> tuple[int, ...]:
         return self._structure_ends.get(start, ())
@@ -598,9 +568,8 @@ def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
             stack.append((node, True))
             stack.extend((child, False) for child in reversed(node.children))
             continue
-        contains_protected[id(node)] = (
-            node.kind in _PROTECTED_KINDS
-            or any(contains_protected[id(child)] for child in node.children)
+        contains_protected[id(node)] = node.kind in _PROTECTED_KINDS or any(
+            contains_protected[id(child)] for child in node.children
         )
 
     # Scope unprotected gaps to their nearest protected ancestor.  A protected
@@ -616,13 +585,7 @@ def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
     ) -> None:
         if start >= end:
             return
-        if (
-            not protected
-            and units
-            and not units[-1][2]
-            and units[-1][1] == start
-            and units[-1][3] == protected_scope
-        ):
+        if not protected and units and not units[-1][2] and units[-1][1] == start and units[-1][3] == protected_scope:
             units[-1] = (units[-1][0], end, False, protected_scope)
         else:
             units.append((start, end, protected, protected_scope))
@@ -630,9 +593,7 @@ def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
     def visit(node: Segment, protected_scope: int | None) -> None:
         if node.kind in _PROTECTED_KINDS:
             protected_scope = id(node)
-        protected_children = [
-            child for child in node.children if contains_protected[id(child)]
-        ]
+        protected_children = [child for child in node.children if contains_protected[id(child)]]
         if node.kind in _PROTECTED_KINDS and not protected_children:
             emit(node.start, node.end, True, protected_scope)
             return
@@ -648,9 +609,7 @@ def _preserved_units(root: Segment) -> tuple[tuple[int, int], ...]:
         emit(cursor, node.end, False, protected_scope)
 
     visit(root, None)
-    return tuple(
-        (start, end) for start, end, _protected, _scope in units
-    )
+    return tuple((start, end) for start, end, _protected, _scope in units)
 
 
 class _HeadingIndex:
@@ -690,11 +649,7 @@ class _HeadingIndex:
             return None
 
         def find_first(node: int, node_start: int, node_end: int) -> int | None:
-            if (
-                node_end <= left
-                or right <= node_start
-                or self._max_ends[node] <= boundary
-            ):
+            if node_end <= left or right <= node_start or self._max_ends[node] <= boundary:
                 return None
             if node_end - node_start == 1:
                 return node_start
@@ -895,10 +850,7 @@ def _token_end(
     # independently feasible.
     adjusted = headings.safe_hard_end(fresh_start, raw)
     boundary_limit = raw
-    if (
-        adjusted > fresh_start
-        and cache.count(context_start, adjusted) <= budget
-    ):
+    if adjusted > fresh_start and cache.count(context_start, adjusted) <= budget:
         boundary_limit = adjusted
 
     position = bisect.bisect_right(boundaries, boundary_limit)
@@ -908,10 +860,7 @@ def _token_end(
         boundary = boundaries[position]
         if boundary <= fresh_start:
             break
-        if (
-            headings.is_safe(fresh_start, boundary)
-            and cache.count(context_start, boundary) <= budget
-        ):
+        if headings.is_safe(fresh_start, boundary) and cache.count(context_start, boundary) <= budget:
             candidate = boundary
             break
     if candidate == 0:
@@ -977,9 +926,7 @@ class _ArbitraryTokenOracle:
         remaining_bytes = self.max_input_bytes - self.input_bytes
         slice_bytes = 0
         for index in range(start, end):
-            slice_bytes += len(
-                self.source[index].encode("utf-8", "surrogatepass")
-            )
+            slice_bytes += len(self.source[index].encode("utf-8", "surrogatepass"))
             if slice_bytes > remaining_bytes:
                 raise TokenSearchLimitExceeded(
                     "input_bytes",
@@ -1057,11 +1004,7 @@ def _arbitrary_end_candidates(
                 break
             same_start_position -= 1
             oracle.step()
-            if (
-                structure_end <= fresh_start
-                or structure_end in yielded
-                or structure_end in unsafe
-            ):
+            if structure_end <= fresh_start or structure_end in yielded or structure_end in unsafe:
                 continue
             if headings.is_safe(fresh_start, structure_end):
                 yielded.add(structure_end)
@@ -1078,11 +1021,7 @@ def _arbitrary_end_candidates(
     # Then every other heading-safe endpoint, without allocating an O(n) list.
     for candidate in range(limit, fresh_start, -1):
         oracle.step()
-        if (
-            candidate in yielded
-            or candidate in unsafe
-            or _registered_boundary(boundaries, candidate)
-        ):
+        if candidate in yielded or candidate in unsafe or _registered_boundary(boundaries, candidate):
             continue
         if headings.is_safe(fresh_start, candidate):
             yielded.add(candidate)
@@ -1154,9 +1093,7 @@ def _plan_arbitrary_unit(
             choices[fresh_start] = selected
 
     if unit_start not in reachable:
-        raise ValueError(
-            "token_counter cannot fit advancing source content within max_tokens"
-        )
+        raise ValueError("token_counter cannot fit advancing source content within max_tokens")
 
     result: list[_PlannedTokenChunk] = []
     fresh_start = unit_start
@@ -1215,17 +1152,13 @@ def _provenance_for(
 ) -> tuple[ChunkProvenance, ChunkProvenance, ChunkProvenance]:
     full_references = index.references(start, end)
     content_references = tuple(
-        reference
-        for reference in full_references
-        if reference.end > new_content_start and reference.start < end
+        reference for reference in full_references if reference.end > new_content_start and reference.start < end
     )
     overlap_references = (
         ()
         if start == new_content_start
         else tuple(
-            reference
-            for reference in full_references
-            if reference.end > start and reference.start < new_content_start
+            reference for reference in full_references if reference.end > start and reference.start < new_content_start
         )
     )
     return (
@@ -1311,9 +1244,7 @@ def _normalise_document(
             or mode is not StructuralMode.REPLACE
             or profile is not StructureProfile.CONSERVATIVE
         ):
-            raise ValueError(
-                "segmentation options cannot be supplied with DocumentHierarchy"
-            )
+            raise ValueError("segmentation options cannot be supplied with DocumentHierarchy")
         return document
     if not isinstance(document, str):
         raise TypeError("document must be a string or DocumentHierarchy")
@@ -1368,9 +1299,7 @@ def iter_chunks(
         if not isinstance(token_counter_id, str) or not token_counter_id.strip():
             raise ValueError("max_tokens requires a non-empty token_counter_id")
         if token_counter_policy is None:
-            raise ValueError(
-                "max_tokens requires an explicit token_counter_policy"
-            )
+            raise ValueError("max_tokens requires an explicit token_counter_policy")
         counter_policy = _enum(
             token_counter_policy,
             TokenCounterPolicy,
@@ -1382,9 +1311,7 @@ def iter_chunks(
         unit_kind = "tokens"
         if counter_policy is TokenCounterPolicy.ARBITRARY:
             search_max_calls = _integer(
-                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_CALLS
-                if token_search_max_calls is None
-                else token_search_max_calls,
+                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_CALLS if token_search_max_calls is None else token_search_max_calls,
                 "token_search_max_calls",
                 minimum=1,
             )
@@ -1396,9 +1323,7 @@ def iter_chunks(
                 minimum=1,
             )
             search_max_steps = _integer(
-                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS
-                if token_search_max_steps is None
-                else token_search_max_steps,
+                DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS if token_search_max_steps is None else token_search_max_steps,
                 "token_search_max_steps",
                 minimum=1,
             )
@@ -1411,9 +1336,7 @@ def iter_chunks(
                     token_search_max_steps,
                 )
             ):
-                raise ValueError(
-                    "token search envelopes are only valid for arbitrary counters"
-                )
+                raise ValueError("token search envelopes are only valid for arbitrary counters")
             search_max_calls = None
             search_max_input_bytes = None
             search_max_steps = None
@@ -1521,11 +1444,7 @@ def iter_chunks(
         first_in_unit = True
         while fresh_start < unit_end:
             if unit_kind == "characters":
-                context_start = (
-                    fresh_start
-                    if first_in_unit
-                    else max(unit_start, fresh_start - overlap)
-                )
+                context_start = fresh_start if first_in_unit else max(unit_start, fresh_start - overlap)
                 if context_start + budget <= fresh_start:
                     context_start = fresh_start
                 hard_end = min(unit_end, context_start + budget)
@@ -1552,12 +1471,9 @@ def iter_chunks(
                                 hard_end=hard_end,
                                 respect_boundaries=respect_boundaries,
                             )
-                        if (
-                            end < fitting_end
-                            and hierarchy_index.headings.is_safe(
-                                fresh_start,
-                                fitting_end,
-                            )
+                        if end < fitting_end and hierarchy_index.headings.is_safe(
+                            fresh_start,
+                            fitting_end,
                         ):
                             end = fitting_end
                 if end <= fresh_start:
@@ -1606,9 +1522,7 @@ def iter_chunks(
                         limit=unit_end,
                         budget=budget,
                     )
-                    if fitting is not None and (
-                        planned is None or planned[0] < fitting[0]
-                    ):
+                    if fitting is not None and (planned is None or planned[0] < fitting[0]):
                         fitting_end, fitting_count = fitting
                         if context_start != fresh_start:
                             context_start = fresh_start
@@ -1646,10 +1560,7 @@ def iter_chunks(
                         respect_boundaries=respect_boundaries,
                     )
                 if planned is None:
-                    raise ValueError(
-                        "token_counter cannot fit advancing source content "
-                        "within max_tokens"
-                    )
+                    raise ValueError("token_counter cannot fit advancing source content within max_tokens")
                 end, unit_count = planned
 
             if end <= fresh_start or unit_count > budget:
@@ -1753,8 +1664,8 @@ __all__ = [
     "DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_INPUT_BYTES",
     "DEFAULT_ARBITRARY_TOKEN_SEARCH_MAX_STEPS",
     "DEFAULT_MAX_CHARS",
-    "ChunkingManifest",
     "ChunkProvenance",
+    "ChunkingManifest",
     "ContainerPolicy",
     "DocumentChunk",
     "SegmentReference",

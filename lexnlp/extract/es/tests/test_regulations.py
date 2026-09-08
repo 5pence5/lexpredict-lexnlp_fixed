@@ -185,10 +185,7 @@ class TestRegulationsParserDataFrameInjection:
 
     def test_parser_dedupes_trigger_swallowing_formal_citation(self):
         """A trigger phrase that engulfs a formal citation is suppressed."""
-        text = (
-            "Conforme a la ley de protección Real Decreto 123/2020 vigente,"
-            " los plazos se actualizan."
-        )
+        text = "Conforme a la ley de protección Real Decreto 123/2020 vigente, los plazos se actualizan."
         regs = list(parser.parse(text))
         # The trigger phrase ("ley de protección Real Decreto 123/2020 vigente")
         # fully contains the formal citation, so it must be dropped — only the

@@ -91,7 +91,7 @@ class TestParenthesisedLabelMatcher(TestCase):
         self.assertEqual("Contratante", entry.name)
         self.assertEqual(85, entry.probability)
         # span must wrap the parenthesised group
-        self.assertEqual('(o "Contratante")', phrase[entry.start:entry.end])
+        self.assertEqual('(o "Contratante")', phrase[entry.start : entry.end])
 
     def test_ou_joined_alternatives_share_coords(self):
         phrase = 'As partes (o "Locador" ou "Locatário") concordam.'
@@ -105,9 +105,7 @@ class TestParenthesisedLabelMatcher(TestCase):
 
     def test_no_match(self):
         phrase = "Sem rótulo entre parênteses aqui."
-        self.assertEqual(
-            [], PortugueseParsingMethods.match_pt_def_by_parenthesised_label(phrase)
-        )
+        self.assertEqual([], PortugueseParsingMethods.match_pt_def_by_parenthesised_label(phrase))
 
     def test_multiple_parenthesised_groups(self):
         phrase = '(o "Comprador") e mais tarde (a "Vendedora").'

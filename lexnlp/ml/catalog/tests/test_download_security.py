@@ -7,11 +7,11 @@ import json
 import stat
 from base64 import b64encode
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from lexnlp.ml.catalog import download
-from types import SimpleNamespace
 
 
 def _patch_http_get(monkeypatch, handler):
@@ -21,8 +21,6 @@ def _patch_http_get(monkeypatch, handler):
     module-level ``get``, so the seam is ``_session``.
     """
     monkeypatch.setattr(download, "_session", lambda: SimpleNamespace(get=handler))
-
-
 
 
 class FakeResponse:
@@ -83,9 +81,7 @@ def test_verify_md5_preserves_legacy_public_helper(tmp_path: Path):
     payload = b"legacy checksum payload"
     path = tmp_path / "payload.bin"
     path.write_bytes(payload)
-    checksum = b64encode(
-        hashlib.md5(payload, usedforsecurity=False).digest()
-    ).decode()
+    checksum = b64encode(hashlib.md5(payload, usedforsecurity=False).digest()).decode()
 
     download.GitHubReleaseDownloader.verify_md5(path, checksum)
 
@@ -100,10 +96,7 @@ def test_legacy_download_asset_call_infers_unique_trusted_entry(
     payload = b"reviewed model payload"
     trusted = trusted_asset("pipeline/example/1", "model.bin", payload)
     manifest = download.AssetManifest(
-        models_repo=(
-            "https://api.github.com/repos/LexPredict/"
-            "lexpredict-lexnlp/releases/tags/"
-        ),
+        models_repo=("https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/tags/"),
         assets={trusted.tag: trusted},
     )
     asset = {
@@ -187,12 +180,8 @@ def test_legacy_models_repo_assignment_and_environment_precedence(monkeypatch):
 
     download.GitHubReleaseDownloader.get_tag("pipeline/example/1")
 
-    assert lexnlp.get_models_repo() == (
-        "https://api.github.com/repos/legacy/root/releases/tags/"
-    )
-    assert calls[-1]["url"].startswith(
-        "https://api.github.com/repos/legacy/root/releases/tags/"
-    )
+    assert lexnlp.get_models_repo() == ("https://api.github.com/repos/legacy/root/releases/tags/")
+    assert calls[-1]["url"].startswith("https://api.github.com/repos/legacy/root/releases/tags/")
 
     monkeypatch.setattr(
         download,
@@ -200,26 +189,18 @@ def test_legacy_models_repo_assignment_and_environment_precedence(monkeypatch):
         "https://api.github.com/repos/legacy/download-module/releases/tags/",
     )
     download.GitHubReleaseDownloader.get_tag("pipeline/example/2")
-    assert calls[-1]["url"].startswith(
-        "https://api.github.com/repos/legacy/download-module/releases/tags/"
-    )
+    assert calls[-1]["url"].startswith("https://api.github.com/repos/legacy/download-module/releases/tags/")
 
     monkeypatch.setenv("LEXNLP_MODELS_REPO_SLUG", "environment/wins")
     download.GitHubReleaseDownloader.get_tag("pipeline/example/3")
-    assert calls[-1]["url"].startswith(
-        "https://api.github.com/repos/environment/wins/releases/tags/"
-    )
+    assert calls[-1]["url"].startswith("https://api.github.com/repos/environment/wins/releases/tags/")
 
 
 def test_packaged_manifest_covers_legacy_contract_model_and_corpora():
     manifest = download.load_asset_manifest()
 
-    assert manifest.models_repo == (
-        "https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/tags/"
-    )
-    assert manifest.get("pipeline/is-contract/0.1").filename == (
-        "pipeline_is_contract_classifier.cloudpickle"
-    )
+    assert manifest.models_repo == ("https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/tags/")
+    assert manifest.get("pipeline/is-contract/0.1").filename == ("pipeline_is_contract_classifier.cloudpickle")
     assert manifest.get("pipeline/is-contract/0.2").sha256 == (
         "083bab9998e1b0d858b7a348f17c09af984264744b680407541723647cfbe9f6"
     )
@@ -232,12 +213,8 @@ def test_packaged_manifest_covers_legacy_contract_model_and_corpora():
 def test_runtime_and_quality_gate_release_manifests_are_byte_identical():
     repository_root = Path(__file__).resolve().parents[4]
 
-    assert (
-        repository_root
-        / "lexnlp/ml/catalog/release_asset_manifest.json"
-    ).read_bytes() == (
-        repository_root
-        / "test_data/model_quality/release_asset_manifest.json"
+    assert (repository_root / "lexnlp/ml/catalog/release_asset_manifest.json").read_bytes() == (
+        repository_root / "test_data/model_quality/release_asset_manifest.json"
     ).read_bytes()
 
 
@@ -323,7 +300,7 @@ def test_manifest_rejects_unsafe_catalog_paths(
         encoding="utf-8",
     )
 
-    with pytest.raises(download.AssetTrustError, match="paths|path-free"):
+    with pytest.raises(download.AssetTrustError, match=r"paths|path-free"):
         download.load_asset_manifest(manifest_path)
 
 
@@ -360,10 +337,7 @@ def test_release_destination_cannot_escape_catalog_through_symlink(
     payload = b"reviewed"
     trusted = trusted_asset("pipeline/example/1", "model.bin", payload)
     manifest = download.AssetManifest(
-        models_repo=(
-            "https://api.github.com/repos/LexPredict/"
-            "lexpredict-lexnlp/releases/tags/"
-        ),
+        models_repo=("https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/tags/"),
         assets={trusted.tag: trusted},
     )
     catalog = tmp_path / "catalog"
@@ -380,9 +354,7 @@ def test_release_destination_cannot_escape_catalog_through_symlink(
     monkeypatch.setattr(
         download.GitHubReleaseDownloader,
         "get_tag",
-        lambda *_args, **_kwargs: pytest.fail(
-            "unsafe destinations must fail before network access"
-        ),
+        lambda *_args, **_kwargs: pytest.fail("unsafe destinations must fail before network access"),
     )
 
     with pytest.raises(download.AssetTrustError, match="escapes"):
@@ -500,7 +472,7 @@ def test_local_artifact_verification_is_bound_to_manifest_bytes(tmp_path: Path):
     assert trusted.size == len(payload)
 
     artifact_path.write_bytes(b"tampered model payload")
-    with pytest.raises(download.ChecksumError, match="size|SHA-256"):
+    with pytest.raises(download.ChecksumError, match=r"size|SHA-256"):
         download.verify_trusted_asset_file(
             artifact_path,
             "pipeline/example/1",

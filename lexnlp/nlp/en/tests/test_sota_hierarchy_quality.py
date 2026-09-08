@@ -27,7 +27,6 @@ from lexnlp.nlp.en.tests.segmentation_quality import (
     resolved_gold,
 )
 
-
 BACKEND_ID = "lexnlp-hermetic-regression-sentences-v1"
 
 
@@ -53,12 +52,10 @@ def test_edge_corpus_is_lossless_deterministic_and_profile_aware(case):
     assert_lossless_hierarchy(second)
 
     first_identity = [
-        (kind_value(s.kind), s.start, s.end, s.label, getattr(s, "segment_id", None))
-        for s in all_segments(first)
+        (kind_value(s.kind), s.start, s.end, s.label, getattr(s, "segment_id", None)) for s in all_segments(first)
     ]
     second_identity = [
-        (kind_value(s.kind), s.start, s.end, s.label, getattr(s, "segment_id", None))
-        for s in all_segments(second)
+        (kind_value(s.kind), s.start, s.end, s.label, getattr(s, "segment_id", None)) for s in all_segments(second)
     ]
     assert first_identity == second_identity
 
@@ -116,29 +113,20 @@ def _find_path(node, wanted_kind, wanted_label, path=()):
 
 def test_nested_part_article_section_clause_ancestry_is_not_flattened():
     case = next(
-        case
-        for case in load_fixture("legal_edge_cases.json")["cases"]
-        if case["id"] == "nested_heading_scopes"
+        case for case in load_fixture("legal_edge_cases.json")["cases"] if case["id"] == "nested_heading_scopes"
     )
     document = make_document(case["text"])
     for expectation in case["expected_ancestry"]:
-        path = _find_path(
-            document.root, expectation["kind"], expectation["label"]
-        )
+        path = _find_path(document.root, expectation["kind"], expectation["label"])
         assert path is not None
-        ancestors = {
-            (kind_value(node.kind), normalise_label(node.label))
-            for node in path[:-1]
-        }
+        ancestors = {(kind_value(node.kind), normalise_label(node.label)) for node in path[:-1]}
         for kind, label in expectation["ancestors"]:
             assert (kind, normalise_label(label)) in ancestors
 
 
 def test_schedule_remains_parent_of_part_b():
     case = next(
-        case
-        for case in load_fixture("legal_edge_cases.json")["cases"]
-        if case["id"] == "schedule_contains_part"
+        case for case in load_fixture("legal_edge_cases.json")["cases"] if case["id"] == "schedule_contains_part"
     )
     document = make_document(case["text"])
     path = _find_path(document.root, "section", "PART B — SERVICE LEVELS")
@@ -205,15 +193,9 @@ def test_seeded_unicode_newline_metamorphic_corpus_is_lossless():
     for _ in range(200):
         lines = []
         for _ in range(randomizer.randint(1, 12)):
-            lines.append(
-                "".join(
-                    randomizer.choice(alphabet)
-                    for _ in range(randomizer.randint(0, 60))
-                )
-            )
+            lines.append("".join(randomizer.choice(alphabet) for _ in range(randomizer.randint(0, 60))))
         text = "".join(
-            line + (randomizer.choice(separators) if index < len(lines) - 1 else "")
-            for index, line in enumerate(lines)
+            line + (randomizer.choice(separators) if index < len(lines) - 1 else "") for index, line in enumerate(lines)
         )
         document = make_document(text)
         assert_lossless_hierarchy(document)

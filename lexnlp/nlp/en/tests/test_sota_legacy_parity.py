@@ -14,7 +14,6 @@ from lexnlp.nlp.en.tests.segmentation_quality import (
     load_fixture,
 )
 
-
 BACKEND_ID = "lexnlp-hermetic-regression-sentences-v1"
 CASES = load_fixture("legacy_parity.json")["cases"]
 

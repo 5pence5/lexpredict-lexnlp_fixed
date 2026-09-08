@@ -36,9 +36,7 @@ RATIO_PTN_RE = re.compile(
 )
 
 
-def get_ratio_annotations(
-    text: str, float_digits: int = 4
-) -> Iterator[RatioAnnotation]:
+def get_ratio_annotations(text: str, float_digits: int = 4) -> Iterator[RatioAnnotation]:
     """Yield :class:`RatioAnnotation` for every ratio expression in *text*.
 
     The ratio is computed as ``left / right`` and stored alongside the
@@ -77,9 +75,7 @@ def get_ratios(
             yield ant.left, ant.right, ant.ratio
 
 
-def get_ratio_annotation_list(
-    text: str, float_digits: int = 4
-) -> list[RatioAnnotation]:
+def get_ratio_annotation_list(text: str, float_digits: int = 4) -> list[RatioAnnotation]:
     """Return all ratio annotations in *text* as a list."""
     return list(get_ratio_annotations(text, float_digits))
 

@@ -11,19 +11,6 @@ from dataclasses import replace
 
 from lexnlp.nlp.en.segments import chunks as chunks_core
 from lexnlp.nlp.en.segments import hierarchy as hierarchy_core
-from lexnlp.nlp.en.segments.hierarchy import (
-    DocumentHierarchy,
-    HierarchyManifest,
-    Segment,
-    SegmentKind,
-    StructuralMode,
-    StructuralSpan,
-    StructureProfile,
-    segment_document,
-)
-
-from lexnlp.nlp.en.segments.payloads import render_embedding_payload
-
 from lexnlp.nlp.en.segments.chunks import (
     ChunkProvenance,
     ContainerPolicy,
@@ -36,6 +23,17 @@ from lexnlp.nlp.en.segments.chunks import (
     iter_chunks,
     reconstruct_chunks,
 )
+from lexnlp.nlp.en.segments.hierarchy import (
+    DocumentHierarchy,
+    HierarchyManifest,
+    Segment,
+    SegmentKind,
+    StructuralMode,
+    StructuralSpan,
+    StructureProfile,
+    segment_document,
+)
+from lexnlp.nlp.en.segments.payloads import render_embedding_payload
 
 
 def whole_paragraph(text):
@@ -106,9 +104,12 @@ class LosslessHierarchyTests(unittest.TestCase):
         hierarchy = self.segment(text)
 
         sections = list(hierarchy.segments(SegmentKind.SECTION))
-        self.assertEqual([(node.label, node.start, node.end) for node in sections], [
-            ("3. GOVERNING LAW", 0, len(text)),
-        ])
+        self.assertEqual(
+            [(node.label, node.start, node.end) for node in sections],
+            [
+                ("3. GOVERNING LAW", 0, len(text)),
+            ],
+        )
         self.assertEqual(list(hierarchy.segments(SegmentKind.CLAUSE)), [])
 
     def test_explicit_heading_scope_is_nested_by_compatible_prefix(self):
@@ -138,12 +139,7 @@ class LosslessHierarchyTests(unittest.TestCase):
         self.assertEqual(hierarchy.reconstruct(), text)
 
     def test_numeric_and_parenthetical_heading_depth(self):
-        text = (
-            "SECTION 1 General\nroot\n"
-            "SECTION 1(a) First\none\n"
-            "SECTION 1(b) Second\ntwo\n"
-            "SECTION 2 Other\nthree"
-        )
+        text = "SECTION 1 General\nroot\nSECTION 1(a) First\none\nSECTION 1(b) Second\ntwo\nSECTION 2 Other\nthree"
         hierarchy = self.segment(text)
         sections = list(hierarchy.segments(SegmentKind.SECTION))
 
@@ -178,11 +174,7 @@ class LosslessHierarchyTests(unittest.TestCase):
         )
 
     def test_statute_sequence_promotes_hierarchical_descendant(self):
-        text = (
-            "1. Definitions\nbody\n"
-            "1.1 Included term\nbody\n"
-            "2. Term\nbody"
-        )
+        text = "1. Definitions\nbody\n1.1 Included term\nbody\n2. Term\nbody"
         hierarchy = self.segment(text, structure_profile=StructureProfile.STATUTE)
         sections = list(hierarchy.segments(SegmentKind.SECTION))
 
@@ -257,12 +249,7 @@ class LosslessHierarchyTests(unittest.TestCase):
         )
 
     def test_exact_builtin_table_match_merges_external_layout_evidence(self):
-        text = (
-            "SECTION 1 PRICING\n"
-            "Intro.\n"
-            "Item | Price\n"
-            "Widget | 10\n"
-        )
+        text = "SECTION 1 PRICING\nIntro.\nItem | Price\nWidget | 10\n"
         table_start = text.index("Item | Price")
         external = StructuralSpan(
             SegmentKind.TABLE,
@@ -347,9 +334,7 @@ class LosslessHierarchyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "different kinds"):
             self.segment(
                 text,
-                structural_spans=(
-                    StructuralSpan(SegmentKind.CLAUSE, 0, len(text)),
-                ),
+                structural_spans=(StructuralSpan(SegmentKind.CLAUSE, 0, len(text)),),
                 **common,
             )
         with self.assertRaisesRegex(ValueError, "conflicting structural attribute"):
@@ -366,12 +351,7 @@ class LosslessHierarchyTests(unittest.TestCase):
                 **common,
             )
 
-        crossing_text = (
-            "SECTION 1 FIRST\n"
-            "one\n"
-            "SECTION 2 SECOND\n"
-            "two\n"
-        )
+        crossing_text = "SECTION 1 FIRST\none\nSECTION 2 SECOND\ntwo\n"
         with self.assertRaisesRegex(ValueError, "crossing"):
             self.segment(
                 crossing_text,
@@ -483,14 +463,8 @@ class StatuteSequenceScalingTests(unittest.TestCase):
         return statistics.median(samples), result
 
     def test_numbered_sequence_detector_scales_linearly(self):
-        small = tuple(
-            hierarchy_core._NumericCandidate(index, (str(index + 1),), "Heading")
-            for index in range(1500)
-        )
-        large = tuple(
-            hierarchy_core._NumericCandidate(index, (str(index + 1),), "Heading")
-            for index in range(4500)
-        )
+        small = tuple(hierarchy_core._NumericCandidate(index, (str(index + 1),), "Heading") for index in range(1500))
+        large = tuple(hierarchy_core._NumericCandidate(index, (str(index + 1),), "Heading") for index in range(4500))
 
         self.timed(small)
         small_time, small_result = self.timed(small)
@@ -542,16 +516,10 @@ class LosslessChunkTests(unittest.TestCase):
         self.assertEqual([chunk.unit_count for chunk in chunks], [5, 5, 4])
         self.assertEqual(reconstruct_chunks(chunks), text)
         self.assertEqual(len({chunk.chunk_id for chunk in chunks}), len(chunks))
-        self.assertTrue(
-            all(chunk.manifest.source_id.startswith("doc-1@sha256:") for chunk in chunks)
-        )
+        self.assertTrue(all(chunk.manifest.source_id.startswith("doc-1@sha256:") for chunk in chunks))
 
     def test_preserve_policy_never_packs_complete_section_siblings(self):
-        text = (
-            "1. FIRST\nAlpha applies.\n\n"
-            "2. SECOND\nBeta applies.\n\n"
-            "3. THIRD\nGamma applies."
-        )
+        text = "1. FIRST\nAlpha applies.\n\n2. SECOND\nBeta applies.\n\n3. THIRD\nGamma applies."
         expected = [(0, 25), (25, 50), (50, 73)]
         for budget in (30, 60, 100):
             with self.subTest(budget=budget):
@@ -579,11 +547,7 @@ class LosslessChunkTests(unittest.TestCase):
         self.assertEqual([(chunk.start, chunk.end) for chunk in packed], [(0, 73)])
 
     def test_overlap_provenance_distinguishes_context_from_primary_section(self):
-        text = (
-            "1. FIRST\nAlpha applies.\n\n"
-            "2. SECOND\nBeta applies.\n\n"
-            "3. THIRD\nGamma applies."
-        )
+        text = "1. FIRST\nAlpha applies.\n\n2. SECOND\nBeta applies.\n\n3. THIRD\nGamma applies."
         chunks = chunk_document(
             text,
             max_chars=30,
@@ -702,11 +666,7 @@ class LosslessChunkTests(unittest.TestCase):
             structural_backend_id="tests.layout.v1",
             **self.options(),
         )[0]
-        reference = next(
-            item
-            for item in chunk.provenance.segments
-            if item.kind is SegmentKind.TABLE
-        )
+        reference = next(item for item in chunk.provenance.segments if item.kind is SegmentKind.TABLE)
         self.assertEqual(reference.attributes, table.attributes)
         self.assertIn(reference, chunk.content_provenance.segments)
 
@@ -764,9 +724,7 @@ class LosslessChunkTests(unittest.TestCase):
         )
         original = chunks[1]
         mutated_text = "X" + original.text[1:]
-        mutated_text_sha = hashlib.sha256(
-            mutated_text.encode("utf-8", "surrogatepass")
-        ).hexdigest()
+        mutated_text_sha = hashlib.sha256(mutated_text.encode("utf-8", "surrogatepass")).hexdigest()
         with self.assertRaisesRegex(ValueError, "chunk metadata"):
             replace(
                 original,
@@ -881,19 +839,11 @@ class CorrectiveCoreRegressionTests(unittest.TestCase):
             literal_tree.manifest.tree_sha256,
         )
 
-        none_reference = SegmentReference(
-            "text:0:1", SegmentKind.TEXT, 0, 1, label=None
-        )
-        literal_reference = SegmentReference(
-            "text:0:1", SegmentKind.TEXT, 0, 1, label="<none>"
-        )
+        none_reference = SegmentReference("text:0:1", SegmentKind.TEXT, 0, 1, label=None)
+        literal_reference = SegmentReference("text:0:1", SegmentKind.TEXT, 0, 1, label="<none>")
         empty = ChunkProvenance()
-        none_digest = compute_provenance_sha256(
-            ChunkProvenance((none_reference,)), empty, empty
-        )
-        literal_digest = compute_provenance_sha256(
-            ChunkProvenance((literal_reference,)), empty, empty
-        )
+        none_digest = compute_provenance_sha256(ChunkProvenance((none_reference,)), empty, empty)
+        literal_digest = compute_provenance_sha256(ChunkProvenance((literal_reference,)), empty, empty)
         self.assertNotEqual(none_digest, literal_digest)
 
         none_chunk = chunk_document(
@@ -1036,9 +986,7 @@ class CorrectiveCoreRegressionTests(unittest.TestCase):
         )
         self.assertEqual([(chunk.start, chunk.end) for chunk in packed], [(0, len(text))])
         table_reference = next(
-            reference
-            for reference in preserved[1].provenance.segments
-            if reference.kind is SegmentKind.TABLE
+            reference for reference in preserved[1].provenance.segments if reference.kind is SegmentKind.TABLE
         )
         self.assertEqual(table_reference.attributes, (("page", "1"),))
         self.assertEqual(reconstruct_chunks(preserved), text)
@@ -1055,10 +1003,7 @@ class CorrectiveCoreRegressionTests(unittest.TestCase):
 
     def test_heading_index_keeps_thousands_of_preserved_chunks_subquadratic(self):
         def hierarchy_for(size):
-            text = "".join(
-                f"{index}. H{index}\nbody\n"
-                for index in range(1, size + 1)
-            )
+            text = "".join(f"{index}. H{index}\nbody\n" for index in range(1, size + 1))
             return segment_document(
                 text,
                 paragraph_segmenter=empty_backend,
@@ -1070,12 +1015,8 @@ class CorrectiveCoreRegressionTests(unittest.TestCase):
         small = hierarchy_for(600)
         large = hierarchy_for(1800)
         self.timed(lambda: chunk_document(small, max_chars=32))
-        small_time, small_chunks = self.timed(
-            lambda: chunk_document(small, max_chars=32)
-        )
-        large_time, large_chunks = self.timed(
-            lambda: chunk_document(large, max_chars=32)
-        )
+        small_time, small_chunks = self.timed(lambda: chunk_document(small, max_chars=32))
+        large_time, large_chunks = self.timed(lambda: chunk_document(large, max_chars=32))
 
         self.assertEqual(len(small_chunks), 600)
         self.assertEqual(len(large_chunks), 1800)
@@ -1087,10 +1028,7 @@ class CorrectiveCoreRegressionTests(unittest.TestCase):
 
     def test_table_parent_sweep_is_subquadratic(self):
         def detect(size):
-            text = "".join(
-                f"{index}. introduction\nA | B | C\n\n"
-                for index in range(1, size + 1)
-            )
+            text = "".join(f"{index}. introduction\nA | B | C\n\n" for index in range(1, size + 1))
             return segment_document(
                 text,
                 paragraph_segmenter=empty_backend,
@@ -1155,12 +1093,7 @@ class SecondCorrectiveCoreRegressionTests(unittest.TestCase):
         self.assertEqual(reconstruct_chunks(chunks), "abcdef")
 
     def test_provenance_walker_does_not_slice_remaining_siblings(self):
-        opnames = {
-            instruction.opname
-            for instruction in dis.get_instructions(
-                chunks_core._HierarchyIndex.references
-            )
-        }
+        opnames = {instruction.opname for instruction in dis.get_instructions(chunks_core._HierarchyIndex.references)}
         self.assertTrue(
             {"BUILD_SLICE", "BINARY_SLICE"}.isdisjoint(opnames),
             opnames,
@@ -1177,12 +1110,7 @@ class FinalCoreCorrectionTests(unittest.TestCase):
         }
 
     def test_initial_all_caps_document_title_scopes_to_next_heading(self):
-        text = (
-            "MASTER SERVICES AGREEMENT\n"
-            "Preamble terms apply.\n"
-            "1. SCOPE\n"
-            "Operative body.\n"
-        )
+        text = "MASTER SERVICES AGREEMENT\nPreamble terms apply.\n1. SCOPE\nOperative body.\n"
         hierarchy = segment_document(text, **self.options())
         sections = list(hierarchy.segments(SegmentKind.SECTION))
 
@@ -1200,11 +1128,7 @@ class FinalCoreCorrectionTests(unittest.TestCase):
         )
 
     def test_parenthetical_decimal_clauses_are_detected(self):
-        text = (
-            "SECTION 4 TERMS\n"
-            "4.1(a) First obligation\n"
-            "4.2(a) Second obligation\n"
-        )
+        text = "SECTION 4 TERMS\n4.1(a) First obligation\n4.2(a) Second obligation\n"
         hierarchy = segment_document(text, **self.options())
         clauses = list(hierarchy.segments(SegmentKind.CLAUSE))
 
@@ -1218,14 +1142,7 @@ class FinalCoreCorrectionTests(unittest.TestCase):
         self.assertEqual(clauses[1].end, len(text))
 
     def test_indented_roman_and_bullet_lists_preserve_marker_offsets_and_nesting(self):
-        text = (
-            "SECTION 1 LISTS\n"
-            "(b) Parent\n"
-            "    (i) Child one\n"
-            "    (ii) Child two\n"
-            "(c) Next\n"
-            "• Bullet\n"
-        )
+        text = "SECTION 1 LISTS\n(b) Parent\n    (i) Child one\n    (ii) Child two\n(c) Next\n• Bullet\n"
         hierarchy = segment_document(text, **self.options())
         items = list(hierarchy.segments(SegmentKind.LIST_ITEM))
         by_label = {item.label: item for item in items}
@@ -1343,10 +1260,7 @@ class FinalCoreCorrectionTests(unittest.TestCase):
             **self.options(),
         )
         self.assertEqual(
-            [
-                (chunk.start, chunk.new_content_start, chunk.end)
-                for chunk in chunks
-            ],
+            [(chunk.start, chunk.new_content_start, chunk.end) for chunk in chunks],
             [(0, 0, 2), (1, 2, 4)],
         )
 
@@ -1412,10 +1326,7 @@ class FinalCoreCorrectionTests(unittest.TestCase):
             container_policy=ContainerPolicy.PACK_SIBLINGS,
         )
         self.assertEqual(
-            [
-                (chunk.start, chunk.new_content_start, chunk.end)
-                for chunk in chunks
-            ],
+            [(chunk.start, chunk.new_content_start, chunk.end) for chunk in chunks],
             [(0, 0, 2), (2, 2, 5)],
         )
 
@@ -1604,12 +1515,7 @@ class FinalAlgorithmRegressionTests(unittest.TestCase):
         }
 
     def test_root_outline_closes_before_explicit_section_and_payload(self):
-        text = (
-            "1. Root obligation\r\n"
-            "Root body.\r\n"
-            "  SECTION 2 Later\r\n"
-            "Later body.\r\n"
-        )
+        text = "1. Root obligation\r\nRoot body.\r\n  SECTION 2 Later\r\nLater body.\r\n"
         hierarchy = segment_document(text, **self.options())
         clause = next(hierarchy.segments(SegmentKind.CLAUSE))
         section = next(hierarchy.segments(SegmentKind.SECTION))
@@ -1634,9 +1540,7 @@ class FinalAlgorithmRegressionTests(unittest.TestCase):
             tokenizer_id="tests.characters.v1",
             max_tokens=1_000,
         )
-        self.assertNotIn("1.", tuple(
-            fragment.text for fragment in payload.context_fragments
-        ))
+        self.assertNotIn("1.", tuple(fragment.text for fragment in payload.context_fragments))
 
     def test_nested_outlines_become_siblings_of_later_section(self):
         text = (
@@ -1670,9 +1574,7 @@ class FinalAlgorithmRegressionTests(unittest.TestCase):
             max_chars=1_000,
             container_policy=ContainerPolicy.PRESERVE,
         )
-        self.assertTrue(all(
-            not chunk.start < later.start < chunk.end for chunk in chunks
-        ))
+        self.assertTrue(all(not chunk.start < later.start < chunk.end for chunk in chunks))
         self.assertEqual(reconstruct_chunks(chunks), text)
 
     @staticmethod
@@ -1727,11 +1629,7 @@ class FinalAlgorithmRegressionTests(unittest.TestCase):
         for fresh_start in range(15):
             for boundary in range(15):
                 expected = min(
-                    (
-                        start
-                        for start, end in intervals
-                        if fresh_start < start < boundary < end
-                    ),
+                    (start for start, end in intervals if fresh_start < start < boundary < end),
                     default=None,
                 )
                 with self.subTest(
@@ -1746,20 +1644,22 @@ class FinalAlgorithmRegressionTests(unittest.TestCase):
                         expected,
                     )
 
-        ordered = list(chunks_core._arbitrary_end_candidates(
-            chunks_core._ArbitraryTokenOracle(
-                "x" * 14,
-                len,
-                max_calls=1,
-                max_input_bytes=1,
-                max_steps=100,
-            ),
-            (0, 2, 4, 6, 8),
-            chunks_core._HeadingIndex(((2, 12), (4, 6))),
-            fresh_start=0,
-            limit=8,
-            respect_boundaries=True,
-        ))
+        ordered = list(
+            chunks_core._arbitrary_end_candidates(
+                chunks_core._ArbitraryTokenOracle(
+                    "x" * 14,
+                    len,
+                    max_calls=1,
+                    max_input_bytes=1,
+                    max_steps=100,
+                ),
+                (0, 2, 4, 6, 8),
+                chunks_core._HeadingIndex(((2, 12), (4, 6))),
+                fresh_start=0,
+                limit=8,
+                respect_boundaries=True,
+            )
+        )
         self.assertEqual(ordered[:2], [2, 1])
         self.assertEqual(set(ordered), set(range(1, 9)))
 
@@ -1907,10 +1807,10 @@ class OverlapStructureRegressionTests(unittest.TestCase):
         for index, chunk in enumerate(chunks):
             self.assertEqual(chunk.index, index)
             self.assertEqual(chunk.new_content_start, expected_fresh_start)
-            self.assertEqual(chunk.text, source[chunk.start:chunk.end])
+            self.assertEqual(chunk.text, source[chunk.start : chunk.end])
             self.assertEqual(
                 chunk.content,
-                source[chunk.new_content_start:chunk.end],
+                source[chunk.new_content_start : chunk.end],
             )
             self.assertLessEqual(chunk.unit_count, budget)
             expected_fresh_start = chunk.end
@@ -1951,10 +1851,7 @@ class OverlapStructureRegressionTests(unittest.TestCase):
                     **kwargs,
                 )
                 self.assertEqual(
-                    [
-                        (chunk.start, chunk.new_content_start, chunk.end)
-                        for chunk in chunks
-                    ],
+                    [(chunk.start, chunk.new_content_start, chunk.end) for chunk in chunks],
                     [(0, 0, 15), (15, 15, 30)],
                 )
                 self.assert_integrity(chunks, source, 15)
@@ -1976,20 +1873,14 @@ class OverlapStructureRegressionTests(unittest.TestCase):
                     container_policy=ContainerPolicy.PACK_SIBLINGS,
                 )
                 self.assertEqual(
-                    [
-                        (chunk.start, chunk.new_content_start, chunk.end)
-                        for chunk in chunks
-                    ],
+                    [(chunk.start, chunk.new_content_start, chunk.end) for chunk in chunks],
                     [(0, 0, 15), (15, 15, 30)],
                 )
                 self.assert_integrity(chunks, hierarchy.source, 15)
                 self.assertEqual(chunks[1].overlap_provenance.segments, ())
                 self.assertIn(
                     kind,
-                    {
-                        reference.kind
-                        for reference in chunks[1].content_provenance.segments
-                    },
+                    {reference.kind for reference in chunks[1].content_provenance.segments},
                 )
 
     def test_oversized_structure_still_splits_and_retains_overlap(self):
@@ -2230,10 +2121,7 @@ class OverlapStructureRegressionTests(unittest.TestCase):
                         **kwargs,
                     )
                     self.assertEqual(
-                        [
-                            (chunk.start, chunk.new_content_start, chunk.end)
-                            for chunk in chunks
-                        ],
+                        [(chunk.start, chunk.new_content_start, chunk.end) for chunk in chunks],
                         [(0, 0, 9), (9, 9, 16)],
                     )
                     self.assertEqual(chunks[0].overlap_provenance.segments, ())

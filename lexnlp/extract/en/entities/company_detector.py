@@ -49,6 +49,7 @@ def _is_quoted_defined_term(candidate: str, text: str) -> bool:
     bare = rf"(?<![{re.escape(DEFINED_TERM_QUOTES)}\w])\s*{re.escape(candidate)}(?![\w\s]*[{re.escape(DEFINED_TERM_QUOTES)}])"
     return re.search(bare, text) is None
 
+
 MONTH_NAMES = ["JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC"]
 MONTH_NAMES_STR = "|".join([rf"\-{m}\-" for m in MONTH_NAMES])
 PARTY_PREFIX_STR = rf"^\d\d([0-9\.\s\,]*({MONTH_NAMES_STR}|\-)*[0-9\.\s\,]*)+"

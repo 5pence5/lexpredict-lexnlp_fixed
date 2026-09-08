@@ -7,23 +7,22 @@ import json
 import logging
 import os
 from base64 import b64encode
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from importlib.resources import files
 from math import floor, log, pow
 from pathlib import Path, PurePosixPath, PureWindowsPath
-from collections.abc import Iterator, Mapping
 from typing import Any
 from urllib.parse import urlparse
 
 from requests import Response, Session
 from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 from tqdm import tqdm
+from urllib3.util.retry import Retry
 
 from lexnlp import DEFAULT_MODELS_REPO, get_models_repo
 from lexnlp.ml.artifact_io import atomic_output_path
 from lexnlp.ml.catalog import CATALOG, invalidate_catalog_cache
-
 
 LOGGER: logging.Logger = logging.getLogger(__name__)
 
@@ -148,9 +147,7 @@ def _normalise_repo_url(url: str) -> str:
 
 def _configured_models_repo() -> str:
     """Resolve the repository while retaining legacy assignment semantics."""
-    if (os.getenv("LEXNLP_MODELS_REPO") or "").strip() or (
-        os.getenv("LEXNLP_MODELS_REPO_SLUG") or ""
-    ).strip():
+    if (os.getenv("LEXNLP_MODELS_REPO") or "").strip() or (os.getenv("LEXNLP_MODELS_REPO_SLUG") or "").strip():
         return get_models_repo()
 
     legacy_value = str(MODELS_REPO or "").strip()
@@ -185,9 +182,7 @@ def _catalog_destination_directory(tag: str) -> Path:
     try:
         destination.relative_to(catalog_root)
     except ValueError as error:
-        raise AssetTrustError(
-            f"Release tag escapes the local catalog directory: {tag!r}"
-        ) from error
+        raise AssetTrustError(f"Release tag escapes the local catalog directory: {tag!r}") from error
     if destination == catalog_root:
         raise AssetTrustError("Release tag must name a directory beneath the catalog")
     return destination
@@ -290,8 +285,7 @@ def _verify_file(path: Path, trusted: TrustedAsset) -> None:
     received = digest.hexdigest()
     if received != trusted.sha256:
         raise ChecksumError(
-            f"SHA-256 verification failed for {trusted.tag!r}: "
-            f"received={received}, expected={trusted.sha256}"
+            f"SHA-256 verification failed for {trusted.tag!r}: received={received}, expected={trusted.sha256}"
         )
 
 
@@ -392,9 +386,7 @@ class GitHubReleaseDownloader:
         except KeyError as error:
             if filename is None:
                 raise KeyError(f"Available keys: {payload.keys()}") from error
-            raise AssetTrustError(
-                "GitHub release response does not contain an asset list"
-            ) from error
+            raise AssetTrustError("GitHub release response does not contain an asset list") from error
         except (TypeError, ValueError) as error:
             raise AssetTrustError("GitHub release response does not contain an asset list") from error
 
@@ -403,9 +395,7 @@ class GitHubReleaseDownloader:
 
         matches = [asset for asset in assets if asset.get("name") == filename]
         if len(matches) != 1:
-            raise AssetTrustError(
-                f"Expected exactly one release asset named {filename!r}; found {len(matches)}"
-            )
+            raise AssetTrustError(f"Expected exactly one release asset named {filename!r}; found {len(matches)}")
         return matches[0]
 
     @staticmethod
@@ -425,10 +415,7 @@ class GitHubReleaseDownloader:
                 digest.update(chunk)
         received = b64encode(digest.digest()).decode()
         if received != checksum:
-            raise ChecksumError(
-                "MD5 checksum verification failed! "
-                f"Received: {received} Expected: {checksum}"
-            )
+            raise ChecksumError(f"MD5 checksum verification failed! Received: {received} Expected: {checksum}")
 
     @staticmethod
     def yield_asset(
@@ -498,15 +485,11 @@ class GitHubReleaseDownloader:
             expected_host = expected_host or urlparse(models_repo).hostname
 
         if name != trusted.filename or advertised_size != trusted.size:
-            raise AssetTrustError(
-                f"Release metadata does not match the trusted manifest for tag={trusted.tag!r}"
-            )
+            raise AssetTrustError(f"Release metadata does not match the trusted manifest for tag={trusted.tag!r}")
 
         asset_url = str(asset.get("url", ""))
         parsed_url = urlparse(asset_url)
-        trusted_host = expected_host or urlparse(
-            _normalise_repo_url(_configured_models_repo())
-        ).hostname
+        trusted_host = expected_host or urlparse(_normalise_repo_url(_configured_models_repo())).hostname
         if (
             parsed_url.scheme != "https"
             or not parsed_url.hostname
@@ -537,9 +520,7 @@ class GitHubReleaseDownloader:
 
         content_length_header = response.headers.get("Content-Length")
         if content_length_header is not None and int(content_length_header) != trusted.size:
-            raise AssetTrustError(
-                f"HTTP Content-Length does not match trusted size for tag={trusted.tag!r}"
-            )
+            raise AssetTrustError(f"HTTP Content-Length does not match trusted size for tag={trusted.tag!r}")
 
         bytes_written = 0
         with atomic_output_path(destination) as temporary_path:
@@ -551,9 +532,7 @@ class GitHubReleaseDownloader:
                 ):
                     bytes_written += len(chunk)
                     if bytes_written > trusted.size:
-                        raise AssetTrustError(
-                            f"Asset exceeded trusted size for tag={trusted.tag!r}"
-                        )
+                        raise AssetTrustError(f"Asset exceeded trusted size for tag={trusted.tag!r}")
                     temporary_file.write(chunk)
 
             if bytes_written != trusted.size:
@@ -581,10 +560,14 @@ def download_github_release(
     trusted = manifest.get(tag)
 
     if prompt_user:
-        answer = input(
-            f"Download verified `{tag}` ({_bytes_to_human_readable(trusted.size)}) "
-            f"from {manifest.models_repo}? [Y/n] "
-        ).strip().lower()
+        answer = (
+            input(
+                f"Download verified `{tag}` ({_bytes_to_human_readable(trusted.size)}) "
+                f"from {manifest.models_repo}? [Y/n] "
+            )
+            .strip()
+            .lower()
+        )
         if answer == "n":
             LOGGER.info("Not downloading %s", tag)
             return None

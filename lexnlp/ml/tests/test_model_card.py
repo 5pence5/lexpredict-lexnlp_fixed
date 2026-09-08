@@ -135,7 +135,7 @@ class TestModelCardMetadataValidation(TestCase):
         # when assigning to a frozen dataclass attribute. Use ``setattr`` to
         # exercise the runtime path without needing a type-checker suppression.
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            setattr(md, "description", "changed")
+            md.description = "changed"
 
     def test_tags_default_is_empty_tuple(self) -> None:
         md = ModelCardMetadata(description="x")

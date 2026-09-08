@@ -40,12 +40,31 @@ from lexnlp.extract.common.annotations.citation_annotation import CitationAnnota
 # ``RE``.
 _REPORTERS = [
     # STJ family
-    "AgRg no AREsp", "AgInt no AREsp", "AgRg no REsp", "AgInt no REsp",
-    "EDcl no REsp", "EREsp", "AREsp", "REsp", "RHC", "RMS",
+    "AgRg no AREsp",
+    "AgInt no AREsp",
+    "AgRg no REsp",
+    "AgInt no REsp",
+    "EDcl no REsp",
+    "EREsp",
+    "AREsp",
+    "REsp",
+    "RHC",
+    "RMS",
     # STF family
-    "ADPF", "ADI", "ADC", "ADO", "ARE", "RE", "HC", "MS", "MI",
+    "ADPF",
+    "ADI",
+    "ADC",
+    "ADO",
+    "ARE",
+    "RE",
+    "HC",
+    "MS",
+    "MI",
     # Tribunais Superiores
-    "IUJur", "CC", "ED", "QO",
+    "IUJur",
+    "CC",
+    "ED",
+    "QO",
 ]
 _REPORTERS_SORTED = sorted(_REPORTERS, key=len, reverse=True)
 _REPORTER_PART = "|".join(re.escape(r) for r in _REPORTERS_SORTED)
@@ -54,10 +73,7 @@ _REPORTER_PART = "|".join(re.escape(r) for r in _REPORTERS_SORTED)
 # ``CC 12345`` — accept either grouped form (with thousands dots) OR
 # ungrouped runs of 4+ digits common in older case-law citations.
 _NUMBER_PART = r"(?:\d{1,3}(?:\.\d{3})*|\d{4,})"
-_UF_LIST = (
-    "AC|AL|AM|AP|BA|CE|DF|ES|GO|MA|MG|MS|MT|PA|PB|PE|PI|PR|"
-    "RJ|RN|RO|RR|RS|SC|SE|SP|TO"
-)
+_UF_LIST = "AC|AL|AM|AP|BA|CE|DF|ES|GO|MA|MG|MS|MT|PA|PB|PE|PI|PR|RJ|RN|RO|RR|RS|SC|SE|SP|TO"
 _YEAR_PART = r"\d{2,4}"
 
 # "REsp 12.345/SP", "RE 123.456", "ADI 1.234"
@@ -127,9 +143,7 @@ def get_cnj_process_annotations(text: str) -> Iterator[CitationAnnotation]:
         cnj = match.groupdict()
         # ``volume_str`` carries the structural breakdown so callers can
         # display it cleanly without re-parsing.
-        volume_str = (
-            f"seg={cnj['segmento']} tr={cnj['tribunal']} orig={cnj['origem']}"
-        )
+        volume_str = f"seg={cnj['segmento']} tr={cnj['tribunal']} orig={cnj['origem']}"
         yield CitationAnnotation(
             coords=match.span("full"),
             text=match.group("full"),

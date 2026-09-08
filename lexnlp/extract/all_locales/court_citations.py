@@ -36,7 +36,5 @@ def get_court_citation_annotations(
     # When the caller does not name a language, take it from the locale rather
     # than forwarding ``None``, which left the annotation with no language at
     # all. Fall back to German alongside the routine fallback above.
-    annotation_language = language or (
-        locale_language if locale_language in ROUTINE_BY_LOCALE else LANG_DE.code
-    )
+    annotation_language = language or (locale_language if locale_language in ROUTINE_BY_LOCALE else LANG_DE.code)
     yield from routine(text, annotation_language)

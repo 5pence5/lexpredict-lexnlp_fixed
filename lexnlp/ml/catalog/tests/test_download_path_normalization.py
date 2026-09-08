@@ -64,7 +64,11 @@ class TestDownloadAssetNormalizesPath:
     @patch("lexnlp.ml.catalog.download._session")
     def test_str_destination_does_not_raise(self, mock_get: MagicMock, tmp_path: Path) -> None:
         mock_get.return_value.get.return_value = _fake_response(b"payload")
-        asset = {"url": "https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/assets/1", "name": "thing.bin", "size": 7}
+        asset = {
+            "url": "https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/assets/1",
+            "name": "thing.bin",
+            "size": 7,
+        }
         # Pass the directory as a *str* on purpose to exercise the fix.
         GitHubReleaseDownloader.download_asset(asset, str(tmp_path), trusted=_trusted("thing.bin", b"payload"))
         assert (tmp_path / "thing.bin").read_bytes() == b"payload"
@@ -72,7 +76,11 @@ class TestDownloadAssetNormalizesPath:
     @patch("lexnlp.ml.catalog.download._session")
     def test_path_destination_still_works(self, mock_get: MagicMock, tmp_path: Path) -> None:
         mock_get.return_value.get.return_value = _fake_response(b"abc")
-        asset = {"url": "https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/assets/1", "name": "abc.bin", "size": 3}
+        asset = {
+            "url": "https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/assets/1",
+            "name": "abc.bin",
+            "size": 3,
+        }
         GitHubReleaseDownloader.download_asset(asset, tmp_path, trusted=_trusted("abc.bin", b"abc"))
         assert (tmp_path / "abc.bin").read_bytes() == b"abc"
 
@@ -80,6 +88,10 @@ class TestDownloadAssetNormalizesPath:
     def test_nested_destination_is_created(self, mock_get: MagicMock, tmp_path: Path) -> None:
         mock_get.return_value.get.return_value = _fake_response(b"ok")
         nested = tmp_path / "a" / "b" / "c"
-        asset = {"url": "https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/assets/1", "name": "n.bin", "size": 2}
+        asset = {
+            "url": "https://api.github.com/repos/LexPredict/lexpredict-lexnlp/releases/assets/1",
+            "name": "n.bin",
+            "size": 2,
+        }
         GitHubReleaseDownloader.download_asset(asset, str(nested), trusted=_trusted("n.bin", b"ok"))
         assert (nested / "n.bin").exists()

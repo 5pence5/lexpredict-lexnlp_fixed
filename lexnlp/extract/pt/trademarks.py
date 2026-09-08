@@ -58,9 +58,7 @@ def get_trademark_annotations(text: str) -> Iterator[TrademarkAnnotation]:
         coords = match.span()
         if coords[1] > len(text):
             coords = (coords[0], len(text))
-        yield TrademarkAnnotation(
-            coords=coords, trademark=match.group(), text=match.group(), locale="pt"
-        )
+        yield TrademarkAnnotation(coords=coords, trademark=match.group(), text=match.group(), locale="pt")
 
 
 def get_trademarks(text: str) -> Iterator[str]:

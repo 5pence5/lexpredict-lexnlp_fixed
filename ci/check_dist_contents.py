@@ -103,11 +103,7 @@ def normalise_package_name(name: str) -> str | None:
     parts = PurePosixPath(name.replace("\\", "/")).parts
     if parts and parts[0] == "lexnlp":
         package_index = 0
-    elif (
-        len(parts) > 1
-        and parts[1] == "lexnlp"
-        and parts[0].startswith("lexnlp-")
-    ):
+    elif len(parts) > 1 and parts[1] == "lexnlp" and parts[0].startswith("lexnlp-"):
         package_index = 1
     else:
         return None
@@ -215,11 +211,7 @@ def find_duplicate_members(names: Iterable[str]) -> list[str]:
 
 def find_duplicate_resources(names: Iterable[str]) -> list[str]:
     """Return package resource paths represented by multiple archive members."""
-    resources = [
-        normalised
-        for name in names
-        if (normalised := normalise_package_name(name)) is not None
-    ]
+    resources = [normalised for name in names if (normalised := normalise_package_name(name)) is not None]
     counts = Counter(resources)
     return sorted(name for name, count in counts.items() if count > 1)
 
@@ -252,9 +244,7 @@ def find_resource_failures(
             continue
         count = nonempty_line_count(payload)
         if count < minimum:
-            failures.append(
-                f"{label}: {name} has {count} non-empty lines; expected at least {minimum}"
-            )
+            failures.append(f"{label}: {name} has {count} non-empty lines; expected at least {minimum}")
     return failures
 
 
@@ -267,9 +257,7 @@ def validate_source_resources(resources: Mapping[str, bytes]) -> list[str]:
             continue
         count = nonempty_line_count(payload)
         if count < minimum:
-            failures.append(
-                f"source: {name} has {count} non-empty lines; expected at least {minimum}"
-            )
+            failures.append(f"source: {name} has {count} non-empty lines; expected at least {minimum}")
     return failures
 
 
@@ -291,10 +279,7 @@ def validate_installed(source_root: Path) -> int:
             print(f"  - {failure}", file=sys.stderr)
         return 1
 
-    print(
-        f"dist-check: installed package resource parity OK "
-        f"({len(actual)} runtime resources at {package_dir})"
-    )
+    print(f"dist-check: installed package resource parity OK ({len(actual)} runtime resources at {package_dir})")
     return 0
 
 
@@ -307,8 +292,7 @@ def validate_artifacts(dist_dir: Path, source_root: Path) -> int:
     sdists = sorted(dist_dir.glob("*.tar.gz"))
     if not wheels or not sdists:
         print(
-            "dist-check: expected at least one wheel and one .tar.gz sdist "
-            f"under {dist_dir}",
+            f"dist-check: expected at least one wheel and one .tar.gz sdist under {dist_dir}",
             file=sys.stderr,
         )
         return 1
@@ -327,21 +311,14 @@ def validate_artifacts(dist_dir: Path, source_root: Path) -> int:
             for name in names:
                 normalised = name.replace("\\", "/")
                 if is_forbidden_wheel_member(normalised):
-                    failures.append(
-                        f"{artifact.name}: non-package file in wheel: {normalised}"
-                    )
+                    failures.append(f"{artifact.name}: non-package file in wheel: {normalised}")
         else:
             names = list(iter_tar_names(artifact))
             resources = read_tar_resources(artifact)
             normalised_names = tuple(name.replace("\\\\", "/") for name in names)
             for required in REQUIRED_SEGMENTATION_SDIST_MEMBERS:
-                if not any(
-                    name == required or name.endswith(f"/{required}")
-                    for name in normalised_names
-                ):
-                    failures.append(
-                        f"{artifact.name}: missing segmentation gate source member: {required}"
-                    )
+                if not any(name == required or name.endswith(f"/{required}") for name in normalised_names):
+                    failures.append(f"{artifact.name}: missing segmentation gate source member: {required}")
 
         for violation in find_violations(names):
             failures.append(f"{artifact.name}: forbidden file: {violation}")
@@ -357,10 +334,7 @@ def validate_artifacts(dist_dir: Path, source_root: Path) -> int:
             print(f"  - {failure}", file=sys.stderr)
         return 1
 
-    print(
-        f"dist-check: wheel/sdist resource parity OK "
-        f"({len(expected)} runtime resources)"
-    )
+    print(f"dist-check: wheel/sdist resource parity OK ({len(expected)} runtime resources)")
     return 0
 
 

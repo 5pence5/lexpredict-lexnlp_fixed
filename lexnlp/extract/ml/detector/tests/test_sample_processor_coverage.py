@@ -70,9 +70,7 @@ class TestProcessSample:
     def test_assigns_start_inner_end_and_outer_classes(self) -> None:
         classifier = RecordingClassifier()
         text = "aa bb cc dd"
-        sample_df = pandas.DataFrame(
-            [{"sentence": text, "quantity_formatted": "bb cc dd"}]
-        )
+        sample_df = pandas.DataFrame([{"sentence": text, "quantity_formatted": "bb cc dd"}])
         features, targets = process_sample(
             sample_df,
             classifier,
@@ -94,9 +92,7 @@ class TestProcessSample:
     def test_uses_corgetes_coordinates_when_supplied(self) -> None:
         classifier = RecordingClassifier()
         text = "aa bb cc"
-        sample_df = pandas.DataFrame(
-            [{"sentence": text, "quantity_formatted": [(3, 5)]}]
-        )
+        sample_df = pandas.DataFrame([{"sentence": text, "quantity_formatted": [(3, 5)]}])
         _features, targets = process_sample(
             sample_df,
             classifier,
@@ -108,9 +104,7 @@ class TestProcessSample:
     def test_feature_mask_column_is_forwarded(self) -> None:
         classifier = RecordingClassifier()
         mask = [0, 1, 1, 0]
-        sample_df = pandas.DataFrame(
-            [{"sentence": "aa bb", "quantity_formatted": "aa", "mask": mask}]
-        )
+        sample_df = pandas.DataFrame([{"sentence": "aa bb", "quantity_formatted": "aa", "mask": mask}])
         process_sample(
             sample_df,
             classifier,
@@ -166,9 +160,7 @@ class TestProcessSample:
     def test_multiple_entity_spans_on_one_row(self) -> None:
         classifier = RecordingClassifier()
         text = "aa bb cc dd"
-        sample_df = pandas.DataFrame(
-            [{"sentence": text, "spans": [(0, 2), (9, 11)]}]
-        )
+        sample_df = pandas.DataFrame([{"sentence": text, "spans": [(0, 2), (9, 11)]}])
         _features, targets = process_sample(
             sample_df,
             classifier,

@@ -77,9 +77,7 @@ class TestCheckStanford:
 
 
 class TestImportTimeInit:
-    def test_successful_construction_sets_tokenizer_and_tagger(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_successful_construction_sets_tokenizer_and_tagger(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import nltk.tag
         import nltk.tokenize.stanford as nltk_stanford_tok
 
@@ -94,9 +92,7 @@ class TestImportTimeInit:
         assert reloaded.STANFORD_TAGGER.model == reloaded.STANFORD_DEFAULT_TAG_MODEL
         assert reloaded.STANFORD_TAGGER.jar == reloaded.STANFORD_POS_FILE
 
-    def test_lookup_error_leaves_tokenizer_and_tagger_none(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_lookup_error_leaves_tokenizer_and_tagger_none(self, monkeypatch: pytest.MonkeyPatch) -> None:
         import nltk.tag
         import nltk.tokenize.stanford as nltk_stanford_tok
 
@@ -143,9 +139,7 @@ class TestGetVerbs:
         verbs = list(stanford.get_verbs("The cats RUN", lowercase=True, lemmatize=False))
         assert verbs == ["run"]
 
-    def test_lemmatize_uses_lemma_list(
-        self, enabled_stanford: None, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_lemmatize_uses_lemma_list(self, enabled_stanford: None, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             stanford,
             "get_lemma_list",
@@ -167,9 +161,7 @@ class TestGetNouns:
         nouns = list(stanford.get_nouns("The CATS run", lowercase=True, lemmatize=False))
         assert nouns == ["cats"]
 
-    def test_lemmatize_uses_lemma_list(
-        self, enabled_stanford: None, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_lemmatize_uses_lemma_list(self, enabled_stanford: None, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setattr(
             stanford,
             "get_lemma_list",

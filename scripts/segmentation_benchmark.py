@@ -21,8 +21,8 @@ import statistics
 import sys
 import time
 import tracemalloc
-from pathlib import Path
 from collections.abc import Iterable, Sequence
+from pathlib import Path
 from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -70,7 +70,7 @@ def _chunk_signature(chunks: Iterable[Any]) -> str:
     for chunk in chunks:
         digest.update(
             f"{chunk.index}:{chunk.start}:{chunk.new_content_start}:{chunk.end}:"
-            f"{chunk.chunk_id}:{chunk.text_sha256}\n".encode("utf-8")
+            f"{chunk.chunk_id}:{chunk.text_sha256}\n".encode()
         )
     return digest.hexdigest()
 
@@ -123,7 +123,7 @@ def run_benchmark(
         peaks.append(peak / (1024 * 1024))
         signatures.append(_chunk_signature(chunks))
         chunk_counts.append(len(chunks))
-        assert "".join(text[chunk.new_content_start:chunk.end] for chunk in chunks) == text
+        assert "".join(text[chunk.new_content_start : chunk.end] for chunk in chunks) == text
         if mode == "characters":
             assert all(len(chunk.text) <= budget["max_chars"] for chunk in chunks)
         else:
@@ -138,9 +138,7 @@ def run_benchmark(
             {"check": "throughput_characters_per_second", "observed": throughput, "minimum": min_throughput}
         )
     if max(peaks) > max_peak_mib:
-        failures.append(
-            {"check": "peak_memory_mib", "observed": max(peaks), "maximum": max_peak_mib}
-        )
+        failures.append({"check": "peak_memory_mib", "observed": max(peaks), "maximum": max_peak_mib})
     if not deterministic:
         failures.append({"check": "deterministic_chunk_identity", "observed": False})
     return {
@@ -193,7 +191,7 @@ def scaling_growth_exponent(sizes: Sequence[int], seconds: Sequence[float]) -> f
     denominator = sum((value - x_mean) ** 2 for value in x)
     if denominator == 0:
         raise ValueError("scaling sizes must not all be equal")
-    return sum((a - x_mean) * (b - y_mean) for a, b in zip(x, y)) / denominator
+    return sum((a - x_mean) * (b - y_mean) for a, b in zip(x, y, strict=True)) / denominator
 
 
 def evaluate_scaling_samples(
@@ -228,9 +226,7 @@ def evaluate_scaling_samples(
                 }
             )
     if exponent > max_growth_exponent:
-        failures.append(
-            {"check": "log_log_growth_exponent", "observed": exponent, "maximum": max_growth_exponent}
-        )
+        failures.append({"check": "log_log_growth_exponent", "observed": exponent, "maximum": max_growth_exponent})
     return {
         "passed": not failures,
         "failures": failures,
@@ -276,9 +272,7 @@ def run_statute_scaling_benchmark(
             raise AssertionError("prebuilt STATUTE hierarchy is not lossless")
         sections = list(hierarchy.segments(SegmentKind.SECTION))
         if len(sections) != heading_count:
-            raise AssertionError(
-                f"STATUTE profile detected {len(sections)} of {heading_count} headings"
-            )
+            raise AssertionError(f"STATUTE profile detected {len(sections)} of {heading_count} headings")
 
         # Hierarchy construction is deliberately outside the clock. This lane
         # isolates the heading-index and protected-container chunk planner.
@@ -293,9 +287,7 @@ def run_statute_scaling_benchmark(
                 overlap_chars=0,
             )
             elapsed = time.perf_counter() - started
-            rebuilt = "".join(
-                text[chunk.new_content_start:chunk.end] for chunk in chunks
-            )
+            rebuilt = "".join(text[chunk.new_content_start : chunk.end] for chunk in chunks)
             if rebuilt != text:
                 raise AssertionError("a timed STATUTE chunk repeat is not lossless")
             observed.append(elapsed)
@@ -303,16 +295,11 @@ def run_statute_scaling_benchmark(
             chunk_counts.append(len(chunks))
 
         median_seconds = statistics.median(observed)
-        characters_per_second = (
-            len(text) / median_seconds if median_seconds else math.inf
-        )
-        deterministic = (
-            len(set(signatures)) == 1 and len(set(chunk_counts)) == 1
-        )
+        characters_per_second = len(text) / median_seconds if median_seconds else math.inf
+        deterministic = len(set(signatures)) == 1 and len(set(chunk_counts)) == 1
         hierarchy_identity = hashlib.sha256(
             "\n".join(
-                f"{segment.start}:{segment.end}:{segment.label}:{segment.segment_id}"
-                for segment in sections
+                f"{segment.start}:{segment.end}:{segment.label}:{segment.segment_id}" for segment in sections
             ).encode("utf-8")
         ).hexdigest()
         samples.append(
@@ -379,19 +366,12 @@ def run_statute_scaling_benchmark(
         },
         "samples": samples,
         "analysis": {
-            **{
-                key: value
-                for key, value in classification.items()
-                if key not in {"passed", "failures"}
-            },
-            "all_repeat_outputs_deterministic": all(
-                sample["deterministic"] for sample in samples
-            ),
-            "largest_sample_characters_per_second": largest[
-                "characters_per_second"
-            ],
+            **{key: value for key, value in classification.items() if key not in {"passed", "failures"}},
+            "all_repeat_outputs_deterministic": all(sample["deterministic"] for sample in samples),
+            "largest_sample_characters_per_second": largest["characters_per_second"],
         },
     }
+
 
 def _sizes(value: str) -> tuple[int, ...]:
     try:

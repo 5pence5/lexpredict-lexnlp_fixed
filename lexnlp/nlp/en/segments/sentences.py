@@ -34,7 +34,9 @@ from lexnlp.ml.model_io import load_bundled_model
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Load segmenters
-SENTENCE_SEGMENTER_MODEL: PunktSentenceTokenizer = load_bundled_model(os.path.join(MODULE_PATH, "./sentence_segmenter.pickle"))
+SENTENCE_SEGMENTER_MODEL: PunktSentenceTokenizer = load_bundled_model(
+    os.path.join(MODULE_PATH, "./sentence_segmenter.pickle")
+)
 extra_abbreviations = [a.rstrip(".") for a in EnLanguageTokens.abbreviations]
 SENTENCE_SEGMENTER_MODEL._params.abbrev_types.update(extra_abbreviations)
 SENTENCE_SEGMENTER_MODEL._params.abbrev_types.update(["no", "l"])

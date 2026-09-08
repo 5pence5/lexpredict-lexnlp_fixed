@@ -37,9 +37,12 @@ from lexnlp.extract.common.annotations.amount_annotation import AmountAnnotation
 # spellings transparently.
 _UNITS = {
     "zero": 0,
-    "um": 1, "uma": 1,
-    "dois": 2, "duas": 2,
-    "três": 3, "tres": 3,  # "tres" is the unaccented OCR fallback
+    "um": 1,
+    "uma": 1,
+    "dois": 2,
+    "duas": 2,
+    "três": 3,
+    "tres": 3,  # "tres" is the unaccented OCR fallback
     "quatro": 4,
     "cinco": 5,
     "seis": 6,
@@ -54,12 +57,16 @@ _TEENS = {
     "onze": 11,
     "doze": 12,
     "treze": 13,
-    "catorze": 14, "quatorze": 14,
+    "catorze": 14,
+    "quatorze": 14,
     "quinze": 15,
-    "dezesseis": 16, "dezasseis": 16,  # dezasseis = pt-PT spelling
-    "dezessete": 17, "dezassete": 17,
+    "dezesseis": 16,
+    "dezasseis": 16,  # dezasseis = pt-PT spelling
+    "dezessete": 17,
+    "dezassete": 17,
     "dezoito": 18,
-    "dezenove": 19, "dezanove": 19,
+    "dezenove": 19,
+    "dezanove": 19,
 }
 
 _TENS = {
@@ -69,7 +76,9 @@ _TENS = {
     # ``cinqüenta`` is the pre-1990-Acordo-Ortográfico spelling (with
     # trema), still common in older Brazilian legal documents and OCR;
     # ``cincoenta`` is an older popular variant.
-    "cinquenta": 50, "cinqüenta": 50, "cincoenta": 50,
+    "cinquenta": 50,
+    "cinqüenta": 50,
+    "cincoenta": 50,
     "sessenta": 60,
     "setenta": 70,
     "oitenta": 80,
@@ -81,14 +90,22 @@ _TENS = {
 _HUNDREDS = {
     "cem": 100,
     "cento": 100,
-    "duzentos": 200, "duzentas": 200,
-    "trezentos": 300, "trezentas": 300,
-    "quatrocentos": 400, "quatrocentas": 400,
-    "quinhentos": 500, "quinhentas": 500,
-    "seiscentos": 600, "seiscentas": 600,
-    "setecentos": 700, "setecentas": 700,
-    "oitocentos": 800, "oitocentas": 800,
-    "novecentos": 900, "novecentas": 900,
+    "duzentos": 200,
+    "duzentas": 200,
+    "trezentos": 300,
+    "trezentas": 300,
+    "quatrocentos": 400,
+    "quatrocentas": 400,
+    "quinhentos": 500,
+    "quinhentas": 500,
+    "seiscentos": 600,
+    "seiscentas": 600,
+    "setecentos": 700,
+    "setecentas": 700,
+    "oitocentos": 800,
+    "oitocentas": 800,
+    "novecentos": 900,
+    "novecentas": 900,
 }
 
 _SMALL = {**_UNITS, **_TEENS, **_TENS, **_HUNDREDS}
@@ -97,19 +114,27 @@ _SMALL = {**_UNITS, **_TEENS, **_TENS, **_HUNDREDS}
 # plural form when ≥ 2.
 _MULTIPLIERS = {
     "mil": 1000,
-    "milhão": 1_000_000, "milhao": 1_000_000,
-    "milhões": 1_000_000, "milhoes": 1_000_000,
-    "bilhão": 1_000_000_000, "bilhao": 1_000_000_000,
-    "bilhões": 1_000_000_000, "bilhoes": 1_000_000_000,
-    "trilhão": 1_000_000_000_000, "trilhao": 1_000_000_000_000,
-    "trilhões": 1_000_000_000_000, "trilhoes": 1_000_000_000_000,
+    "milhão": 1_000_000,
+    "milhao": 1_000_000,
+    "milhões": 1_000_000,
+    "milhoes": 1_000_000,
+    "bilhão": 1_000_000_000,
+    "bilhao": 1_000_000_000,
+    "bilhões": 1_000_000_000,
+    "bilhoes": 1_000_000_000,
+    "trilhão": 1_000_000_000_000,
+    "trilhao": 1_000_000_000_000,
+    "trilhões": 1_000_000_000_000,
+    "trilhoes": 1_000_000_000_000,
 }
 
 # Halves and quarters are common in legal writing ("um milhão e meio").
 _FRACTIONS = {
-    "meio": Decimal("0.5"), "meia": Decimal("0.5"),
+    "meio": Decimal("0.5"),
+    "meia": Decimal("0.5"),
     "metade": Decimal("0.5"),
-    "terço": Decimal("1") / Decimal("3"), "terco": Decimal("1") / Decimal("3"),
+    "terço": Decimal("1") / Decimal("3"),
+    "terco": Decimal("1") / Decimal("3"),
     "quarto": Decimal("0.25"),
     "quartos": Decimal("0.25"),
 }
@@ -133,9 +158,7 @@ _WORD_NUMBER_RE = re.compile(
 # ("2,5 milhões", "1.234,56 mil"). We match this *before* the bare
 # word-only matcher so the multiplier is consumed only once.
 _PT_NUMBER_PTN = r"\d{1,3}(?:\.\d{3})*(?:,\d+)?|\d+(?:,\d+)?"
-_MULT_RE_PART = "|".join(
-    re.escape(t) for t in sorted(_MULTIPLIERS, key=len, reverse=True)
-)
+_MULT_RE_PART = "|".join(re.escape(t) for t in sorted(_MULTIPLIERS, key=len, reverse=True))
 _NUM_WITH_MULT_RE = re.compile(
     rf"(?<![\w.])(?P<num>{_PT_NUMBER_PTN})\s+(?P<mult>{_MULT_RE_PART})(?!\w)",
     re.UNICODE | re.IGNORECASE,
@@ -234,9 +257,7 @@ def text_to_number(text: str) -> Decimal | None:
 # ---------------------------------------------------------------------------
 
 
-def get_amount_annotations(
-    text: str, float_digits: int = 4
-) -> Iterator[AmountAnnotation]:
+def get_amount_annotations(text: str, float_digits: int = 4) -> Iterator[AmountAnnotation]:
     """Yield :class:`AmountAnnotation` for every numeric/word amount in *text*.
 
     Order: numeric-with-multiplier matches first (``2,5 milhões``), then
@@ -252,9 +273,7 @@ def get_amount_annotations(
     for match in _NUM_WITH_MULT_RE.finditer(text):
         span = match.span()
         seen_spans.append(span)
-        amount = _parse_pt_number(match.group("num")) * Decimal(
-            _MULTIPLIERS[match.group("mult").lower()]
-        )
+        amount = _parse_pt_number(match.group("num")) * Decimal(_MULTIPLIERS[match.group("mult").lower()])
         if float_digits:
             amount = round(amount, float_digits)
         yield AmountAnnotation(coords=span, text=match.group(), value=amount, locale="pt")
@@ -295,9 +314,7 @@ def get_amounts(text: str, float_digits: int = 4) -> Iterator[Decimal]:
         yield ant.value
 
 
-def get_amount_annotation_list(
-    text: str, float_digits: int = 4
-) -> list[AmountAnnotation]:
+def get_amount_annotation_list(text: str, float_digits: int = 4) -> list[AmountAnnotation]:
     """Return all :class:`AmountAnnotation` instances for *text* as a list."""
     return list(get_amount_annotations(text, float_digits))
 

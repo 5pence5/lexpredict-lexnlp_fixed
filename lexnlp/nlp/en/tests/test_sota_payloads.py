@@ -98,18 +98,14 @@ class TestEmbeddingPayloads(TestCase):
         )
         self.assertEqual((), payload.context_fragments)
         self.assertNotIn("FIRST", payload.text)
-        overlap = next(
-            ref for ref in second.overlap_provenance.segments if ref.label == "FIRST"
-        )
+        overlap = next(ref for ref in second.overlap_provenance.segments if ref.label == "FIRST")
         with self.assertRaisesRegex(ValueError, "overlap-only"):
             render_embedding_payload(
                 second,
                 token_counter=len,
                 tokenizer_id="characters:v1",
                 max_tokens=30,
-                context_fragments=(
-                    ContextFragment("heading", "FIRST", overlap.segment_id),
-                ),
+                context_fragments=(ContextFragment("heading", "FIRST", overlap.segment_id),),
             )
 
     def test_explicit_table_context_is_traced_deduplicated_and_strict(self):
@@ -133,15 +129,9 @@ class TestEmbeddingPayloads(TestCase):
         chunk = next(
             candidate
             for candidate in chunks
-            if any(
-                ref.kind is SegmentKind.TABLE
-                for ref in candidate.content_provenance.segments
-            )
+            if any(ref.kind is SegmentKind.TABLE for ref in candidate.content_provenance.segments)
         )
-        table = next(
-            ref for ref in chunk.content_provenance.segments
-            if ref.kind is SegmentKind.TABLE
-        )
+        table = next(ref for ref in chunk.content_provenance.segments if ref.kind is SegmentKind.TABLE)
         fragment = ContextFragment("table_header", "Name | Amount", table.segment_id)
         payload = render_embedding_payload(
             chunk,
@@ -173,18 +163,13 @@ class TestEmbeddingPayloads(TestCase):
             max_chars=100,
             sentence_segmenter=_whole_span,
         )[0]
-        paragraph = next(
-            ref for ref in chunk.content_provenance.segments
-            if ref.kind is SegmentKind.PARAGRAPH
-        )
+        paragraph = next(ref for ref in chunk.content_provenance.segments if ref.kind is SegmentKind.PARAGRAPH)
         with self.assertRaisesRegex(ValueError, "TABLE"):
             render_embedding_payload(
                 chunk,
                 token_counter=len,
                 tokenizer_id="characters:v1",
                 max_tokens=20,
-                context_fragments=(
-                    ContextFragment("table_header", "Header", paragraph.segment_id),
-                ),
+                context_fragments=(ContextFragment("table_header", "Header", paragraph.segment_id),),
                 include_ancestry_labels=False,
             )

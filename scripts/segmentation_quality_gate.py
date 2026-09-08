@@ -13,8 +13,8 @@ import argparse
 import json
 import statistics
 import sys
+from collections.abc import Mapping, Sequence
 from pathlib import Path
-from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -27,7 +27,6 @@ from lexnlp.nlp.en.tests.segmentation_quality import (
     COMPLETE_KINDS,
     STRUCTURAL_KINDS,
     actual_spans,
-    all_segments,
     anchor_recall,
     assert_lossless_hierarchy,
     canonical_json_sha256,
@@ -35,7 +34,6 @@ from lexnlp.nlp.en.tests.segmentation_quality import (
     deterministic_sentence_spans,
     lexical_rank,
     load_fixture,
-    per_kind_exact_counts,
     prf,
     resolve_gold_span,
     resolved_gold,
@@ -218,11 +216,7 @@ def _validate_external_shape(payload: Mapping[str, Any], *, require_rankings: bo
     overlap_chars = configuration.get("overlap_chars")
     if isinstance(max_chars, bool) or not isinstance(max_chars, int) or max_chars <= 0:
         raise ValueError("candidate_chunking.max_chars must be a positive integer")
-    if (
-        isinstance(overlap_chars, bool)
-        or not isinstance(overlap_chars, int)
-        or not 0 <= overlap_chars < max_chars
-    ):
+    if isinstance(overlap_chars, bool) or not isinstance(overlap_chars, int) or not 0 <= overlap_chars < max_chars:
         raise ValueError("candidate_chunking.overlap_chars must be in [0,max_chars)")
     _policy(str(configuration.get("container_policy")))
 
@@ -263,9 +257,7 @@ def prepare_external_manifest(payload_or_path: Mapping[str, Any] | str | Path) -
             "conservative structure profile only",
             "no embedding payload or token-mode evaluation",
         ],
-        "retrieval_manifest_sha256": canonical_json_sha256(
-            _external_retrieval_evidence(payload)
-        ),
+        "retrieval_manifest_sha256": canonical_json_sha256(_external_retrieval_evidence(payload)),
         "candidate_configuration_sha256": canonical_json_sha256(configuration),
         "candidate_set_sha256": canonical_json_sha256(candidate_evidence),
         "candidate_chunking": configuration,
@@ -279,9 +271,7 @@ def _load_payload(payload_or_path: Mapping[str, Any] | str | Path) -> dict[str, 
     return json.loads(Path(payload_or_path).read_text(encoding="utf-8"))
 
 
-def _validate_ranking_provenance(
-    payload: Mapping[str, Any], prepared: Mapping[str, Any]
-) -> Mapping[str, Any]:
+def _validate_ranking_provenance(payload: Mapping[str, Any], prepared: Mapping[str, Any]) -> Mapping[str, Any]:
     provenance = payload.get("ranking_provenance")
     if not isinstance(provenance, Mapping):
         raise ValueError("ranking_provenance must be an object")
@@ -324,9 +314,7 @@ def evaluate_external_manifest(
                 raise ValueError(f"{document['id']}/{query['id']}: duplicate ranked chunk id")
             unknown = [chunk_id for chunk_id in ranking_ids if chunk_id not in by_id]
             if unknown:
-                raise ValueError(
-                    f"{document['id']}/{query['id']}: ranking contains non-candidate chunk IDs"
-                )
+                raise ValueError(f"{document['id']}/{query['id']}: ranking contains non-candidate chunk IDs")
             ranked = [by_id[chunk_id] for chunk_id in ranking_ids]
             metrics = retrieval_metrics(
                 [(chunk.start, chunk.end) for chunk in ranked],
@@ -405,9 +393,7 @@ def _evaluate_edge_cases(edge_fixture: Mapping[str, Any]) -> dict[str, Any]:
         )
     structure_counts = count_exact_spans(expected_structural, actual_structural)
     return {
-        "exact_reconstruction_rate": statistics.fmean(
-            float(item["exact_reconstruction"]) for item in per_case
-        ),
+        "exact_reconstruction_rate": statistics.fmean(float(item["exact_reconstruction"]) for item in per_case),
         "anchors_found": found,
         "anchors_total": total,
         "anchor_recall": found / total if total else 1.0,
@@ -422,14 +408,8 @@ def _evaluate_complete_boundaries(boundary_fixture: Mapping[str, Any]) -> dict[s
     for case in boundary_fixture["cases"]:
         document = _segment(case["text"])
         assert_lossless_hierarchy(document)
-        expected_all.extend(
-            (case["id"],) + item
-            for item in resolved_gold(case["text"], case["gold_spans"])
-        )
-        actual_all.extend(
-            (case["id"],) + item
-            for item in actual_spans(document, COMPLETE_KINDS)
-        )
+        expected_all.extend((case["id"],) + item for item in resolved_gold(case["text"], case["gold_spans"]))
+        actual_all.extend((case["id"],) + item for item in actual_spans(document, COMPLETE_KINDS))
     per_kind = {}
     for kind in COMPLETE_KINDS:
         expected = [item[1:] for item in expected_all if item[1] == kind]
@@ -459,12 +439,8 @@ def _evaluate_retrieval(
         for query in document["queries"]:
             ranked = lexical_rank(query["query"], chunks)
             gold = [resolve_gold_span(document["text"], {"anchor": anchor}) for anchor in query["answer_anchors"]]
-            at_one = retrieval_metrics(
-                [(chunk.start, chunk.end) for chunk in ranked], gold, k=1
-            )
-            at_three = retrieval_metrics(
-                [(chunk.start, chunk.end) for chunk in ranked], gold, k=3
-            )
+            at_one = retrieval_metrics([(chunk.start, chunk.end) for chunk in ranked], gold, k=1)
+            at_three = retrieval_metrics([(chunk.start, chunk.end) for chunk in ranked], gold, k=3)
             query_results.append(
                 {
                     "document_id": document["id"],
@@ -500,15 +476,17 @@ def _evaluate_retrieval(
         "max_chunk_characters": max(chunk_lengths, default=0),
         "source_characters": source_characters,
         "indexed_characters": indexed_characters,
-        "index_character_amplification": (
-            indexed_characters / source_characters if source_characters else 1.0
-        ),
+        "index_character_amplification": (indexed_characters / source_characters if source_characters else 1.0),
     }
-    return {
-        "query_count": len(query_results),
-        "aggregate": aggregate,
-        "per_query": query_results,
-    }, packing, [candidate_evidence, ranking_evidence]
+    return (
+        {
+            "query_count": len(query_results),
+            "aggregate": aggregate,
+            "per_query": query_results,
+        },
+        packing,
+        [candidate_evidence, ranking_evidence],
+    )
 
 
 def run_quality_gate(
@@ -531,20 +509,43 @@ def run_quality_gate(
 
     segmentation = _evaluate_edge_cases(edge_fixture)
     boundaries = _evaluate_complete_boundaries(boundary_fixture)
-    retrieval, packing, generated_evidence = _evaluate_retrieval(
-        retrieval_fixture, configuration
-    )
+    retrieval, packing, generated_evidence = _evaluate_retrieval(retrieval_fixture, configuration)
 
     failures = []
     checks = [
         ("anchor_recall", segmentation["anchor_recall"], ">=", active_thresholds["min_anchor_recall"]),
-        ("structural_precision", segmentation["structural"]["precision"], ">=", active_thresholds["min_structural_precision"]),
+        (
+            "structural_precision",
+            segmentation["structural"]["precision"],
+            ">=",
+            active_thresholds["min_structural_precision"],
+        ),
         ("structural_recall", segmentation["structural"]["recall"], ">=", active_thresholds["min_structural_recall"]),
         ("mrr", retrieval["aggregate"]["mrr"], ">=", active_thresholds["min_mrr"]),
-        ("character_recall_at_3", retrieval["aggregate"]["character_recall_at_3"], ">=", active_thresholds["min_character_recall_at_3"]),
-        ("context_precision_at_1", retrieval["aggregate"]["context_precision_at_1"], ">=", active_thresholds["min_context_precision_at_1"]),
-        ("mean_chunk_characters", packing["mean_chunk_characters"], "<=", active_thresholds["max_mean_chunk_characters"]),
-        ("index_character_amplification", packing["index_character_amplification"], "<=", active_thresholds["max_index_character_amplification"]),
+        (
+            "character_recall_at_3",
+            retrieval["aggregate"]["character_recall_at_3"],
+            ">=",
+            active_thresholds["min_character_recall_at_3"],
+        ),
+        (
+            "context_precision_at_1",
+            retrieval["aggregate"]["context_precision_at_1"],
+            ">=",
+            active_thresholds["min_context_precision_at_1"],
+        ),
+        (
+            "mean_chunk_characters",
+            packing["mean_chunk_characters"],
+            "<=",
+            active_thresholds["max_mean_chunk_characters"],
+        ),
+        (
+            "index_character_amplification",
+            packing["index_character_amplification"],
+            "<=",
+            active_thresholds["max_index_character_amplification"],
+        ),
     ]
     for kind, metrics in boundaries["per_kind"].items():
         checks.extend(
@@ -556,9 +557,7 @@ def run_quality_gate(
     for name, observed, operator, threshold in checks:
         failed = observed < threshold if operator == ">=" else observed > threshold
         if failed:
-            failures.append(
-                {"check": name, "observed": observed, "operator": operator, "threshold": threshold}
-            )
+            failures.append({"check": name, "observed": observed, "operator": operator, "threshold": threshold})
 
     candidate_evidence, ranking_evidence = generated_evidence
     evidence = {

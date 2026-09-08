@@ -53,14 +53,10 @@ def test_pipeline_fits_under_sklearn_18(tiny_corpus: tuple[list[str], list[str]]
         pipeline = train_contract_type_pipeline(texts, labels, random_state=7)
     # Smoke-prediction: make sure the trained pipeline can score a doc.
     predictions = pipeline.predict(texts)
-    assert set(predictions) <= set(labels), (
-        f"Pipeline emitted unexpected labels: {set(predictions) - set(labels)}"
-    )
+    assert set(predictions) <= set(labels), f"Pipeline emitted unexpected labels: {set(predictions) - set(labels)}"
 
 
-def test_pipeline_round_trips_via_skops(
-    tmp_path: Path, tiny_corpus: tuple[list[str], list[str]]
-) -> None:
+def test_pipeline_round_trips_via_skops(tmp_path: Path, tiny_corpus: tuple[list[str], list[str]]) -> None:
     """``write_pipeline_to_catalog`` + ``load_model`` must preserve predictions."""
 
     from lexnlp.extract.en.contracts import runtime_model

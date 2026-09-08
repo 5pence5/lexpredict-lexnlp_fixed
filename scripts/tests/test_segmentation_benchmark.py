@@ -1,6 +1,7 @@
 # QUALITY_BLOB_RECONSTRUCTION_V3
 from __future__ import annotations
 
+import argparse
 import json
 
 import pytest
@@ -48,10 +49,7 @@ def test_impossible_throughput_threshold_fails_the_gate():
         max_peak_mib=256.0,
     )
     assert not report["passed"]
-    assert any(
-        failure["check"] == "throughput_characters_per_second"
-        for failure in report["failures"]
-    )
+    assert any(failure["check"] == "throughput_characters_per_second" for failure in report["failures"])
 
 
 def test_pure_scaling_classifier_accepts_linear_samples():
@@ -72,9 +70,7 @@ def test_pure_scaling_classifier_rejects_historical_quadratic_growth():
     )
     assert not result["passed"]
     assert result["log_log_growth_exponent"] == pytest.approx(2.0)
-    assert {
-        failure["check"] for failure in result["failures"]
-    } == {"adjacent_growth_ratio", "log_log_growth_exponent"}
+    assert {failure["check"] for failure in result["failures"]} == {"adjacent_growth_ratio", "log_log_growth_exponent"}
 
 
 def test_statute_scaling_times_repeatable_chunk_planning_on_prebuilt_hierarchies():
@@ -113,10 +109,7 @@ def test_impossible_statute_scaling_throughput_floor_fails():
         min_scaling_throughput=float("inf"),
     )
     assert not report["passed"]
-    assert any(
-        failure["check"] == "largest_sample_throughput_characters_per_second"
-        for failure in report["failures"]
-    )
+    assert any(failure["check"] == "largest_sample_throughput_characters_per_second" for failure in report["failures"])
 
 
 def test_statute_scaling_fails_on_repeat_signature_mismatch(monkeypatch):
@@ -131,10 +124,7 @@ def test_statute_scaling_fails_on_repeat_signature_mismatch(monkeypatch):
     )
     assert not report["passed"]
     assert not report["analysis"]["all_repeat_outputs_deterministic"]
-    assert any(
-        failure["check"] == "deterministic_statute_chunk_identity"
-        for failure in report["failures"]
-    )
+    assert any(failure["check"] == "deterministic_statute_chunk_identity" for failure in report["failures"])
 
 
 def test_statute_scaling_cli_option_emits_json(tmp_path):
@@ -177,5 +167,7 @@ def test_default_statute_scaling_throughput_floor_is_10000():
 
 @pytest.mark.parametrize("value", ["", "1,2", "10,0,20", "a,b,c"])
 def test_scaling_sizes_parser_rejects_malformed_inputs(value):
-    with pytest.raises(Exception):
+    # argparse.ArgumentTypeError specifically, so argparse turns it into a
+    # usage error rather than a traceback.
+    with pytest.raises(argparse.ArgumentTypeError):
         benchmark._sizes(value)

@@ -125,7 +125,7 @@ class TestAdaptiveMaxWorkers(TestCase):
         from lexnlp.extract.batch.async_extract import adaptive_max_workers
 
         class FakeMemory:
-            available = 1024 ** 3 * 1000  # 1000 GiB — unlimited RAM
+            available = 1024**3 * 1000  # 1000 GiB — unlimited RAM
 
         with patch("psutil.cpu_count", return_value=4):
             with patch("psutil.virtual_memory", return_value=FakeMemory()):

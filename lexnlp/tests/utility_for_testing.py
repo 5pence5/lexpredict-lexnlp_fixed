@@ -40,9 +40,7 @@ def save_test_document(doc_path: str, text: str, encoding: str = "utf-8") -> str
     to a scratch directory: ``LEXNLP_TEST_OUTPUT_DIR`` when set, otherwise a
     per-user directory under the system temp location.
     """
-    output_root = os.environ.get("LEXNLP_TEST_OUTPUT_DIR") or os.path.join(
-        tempfile.gettempdir(), "lexnlp-test-output"
-    )
+    output_root = os.environ.get("LEXNLP_TEST_OUTPUT_DIR") or os.path.join(tempfile.gettempdir(), "lexnlp-test-output")
     full_path = os.path.join(output_root, doc_path)
     os.makedirs(os.path.dirname(full_path), exist_ok=True)
     with codecs.open(full_path, encoding=encoding, mode="w") as fw:

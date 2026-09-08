@@ -384,9 +384,9 @@ def get_regulation_list(text: str, language: str | None = None) -> list[dict]:
 
 __all__ = [
     "ARTICLE_REFERENCE_RE",
-    "PARAGRAPH_LEADING_REFERENCE_RE",
     "CONSTITUTIONAL_REF_RE",
     "FORMAL_CITATION_RE",
+    "PARAGRAPH_LEADING_REFERENCE_RE",
     "RegulationsParser",
     "get_regulation_annotation_list",
     "get_regulation_annotations",

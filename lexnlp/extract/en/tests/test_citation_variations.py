@@ -84,9 +84,7 @@ class TestNormalizedVariationIndex:
             stripped = variation.replace(" ", "")
             # The index may merge multiple original keys that normalise to the
             # same stripped form; the expected canons are a subset of index values.
-            assert stripped in index, (
-                f"Stripped key '{stripped}' (from '{variation}') missing from index"
-            )
+            assert stripped in index, f"Stripped key '{stripped}' (from '{variation}') missing from index"
 
     def test_index_values_are_tuples(self) -> None:
         """All values in the index must be tuples of strings."""
@@ -125,8 +123,7 @@ class TestNormalizedVariationIndex:
         result = canonical_for(spaced_key)
         expected = index[stripped_key]
         assert result == expected, (
-            f"canonical_for('{spaced_key}') → {result!r}, "
-            f"but index['{stripped_key}'] → {expected!r}"
+            f"canonical_for('{spaced_key}') → {result!r}, but index['{stripped_key}'] → {expected!r}"
         )
 
 
@@ -167,6 +164,5 @@ class TestCanonicalForAdditional:
         result_direct = canonical_for(known)
         # Both should resolve to the same canons (both strip spaces internally).
         assert result_spaced == result_direct, (
-            f"Space-padded variant '{spaced}' → {result_spaced!r} differs from "
-            f"direct '{known}' → {result_direct!r}"
+            f"Space-padded variant '{spaced}' → {result_spaced!r} differs from direct '{known}' → {result_direct!r}"
         )

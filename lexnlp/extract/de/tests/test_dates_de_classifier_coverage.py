@@ -44,9 +44,7 @@ class TestMakeDateSamples:
         assert by_text["Spätestens am 01.06.2017"] == [datetime.date(2017, 6, 1)]
         assert by_text["Wird bis Juni 2017 abgeschlossen sein"] == [datetime.date(2017, 6, 1)]
         assert by_text["Abschnitt über 6.25"] == []
-        assert by_text["am siebzehnten Oktober eintausendneunhundertdreiundachtzig"] == [
-            datetime.date(1983, 10, 17)
-        ]
+        assert by_text["am siebzehnten Oktober eintausendneunhundertdreiundachtzig"] == [datetime.date(1983, 10, 17)]
         assert by_text["Anfangsdatum: 11/11/1993"] == [datetime.date(1993, 11, 11)]
         assert by_text["Anfangsdatum: 27/02/2023"] == [datetime.date(2023, 2, 27)]
         assert examples[0][0] == "Spätestens am 01.06.2017"

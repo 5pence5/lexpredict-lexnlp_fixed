@@ -14,7 +14,6 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 import unify_py_file_structure as unify
 
-
 AUTHOR_TEMPLATE = unify.author.strip()
 
 
@@ -103,9 +102,7 @@ class TestUnifyFileStructure:
         captured = capsys.readouterr()
         assert f"Done: {target}" in captured.out
 
-    def test_preserves_shebang_docstring_imports_and_code(
-        self, isolated_project: Path
-    ) -> None:
+    def test_preserves_shebang_docstring_imports_and_code(self, isolated_project: Path) -> None:
         source = (
             "#!/usr/bin/env python\n"
             "# coding: utf-8\n"
@@ -138,7 +135,7 @@ class TestUnifyFileStructure:
     ) -> None:
         target = _write_py(
             isolated_project / "lexnlp" / "dup.py",
-            "x = 1\n__author__ = \"already here\"\n",
+            'x = 1\n__author__ = "already here"\n',
         )
 
         unify.unify_file_structure("0.1.0")
@@ -199,9 +196,7 @@ class TestMain:
         assert exc_info.value.code == 1
         assert 'Provide release number in format "1.2.3"' in capsys.readouterr().out
 
-    def test_release_number_argument_runs_unifier(
-        self, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_release_number_argument_runs_unifier(self, capsys: pytest.CaptureFixture[str]) -> None:
         script = _SCRIPTS_DIR / "unify_py_file_structure.py"
         walked: list[str] = []
 

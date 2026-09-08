@@ -199,7 +199,7 @@ class TestTrainOnDoccanoAndFormattedData(TestCase):
         folder = Path(tempfile.mkdtemp())
         jsonl_path = folder / "doccano.jsonl"
         save_path = folder / "layered.zip"
-        row_text = "Member assets to any Person (a \"Merger Transaction\") unless:"
+        row_text = 'Member assets to any Person (a "Merger Transaction") unless:'
         # definition frames the term the way Doccano exports do
         labels = [
             [0, 27, "definition"],

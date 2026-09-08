@@ -29,7 +29,5 @@ class TestPhraseConstructorSettingsRepr(TestCase):
         self.assertEqual("by score, min_score=2, max_zeros=2", repr(settings))
 
     def test_repr_by_score_custom(self):
-        settings = PhraseConstructorSettings(
-            method=PhraseConstructorMethod.by_score, max_zeros=5, min_token_score=7
-        )
+        settings = PhraseConstructorSettings(method=PhraseConstructorMethod.by_score, max_zeros=5, min_token_score=7)
         self.assertEqual("by score, min_score=7, max_zeros=5", repr(settings))

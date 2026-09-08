@@ -48,7 +48,5 @@ class TestConditionAnnotationCoverage:
         assert d["tags"]["Extracted Entity Post"] == "remedy applies"
 
     def test_get_cite_value_parts_full(self) -> None:
-        ann = ConditionAnnotation(
-            coords=(0, 10), condition="if", pre="when", post="then"
-        )
+        ann = ConditionAnnotation(coords=(0, 10), condition="if", pre="when", post="then")
         assert ann.get_cite_value_parts() == ["if", "when", "then"]

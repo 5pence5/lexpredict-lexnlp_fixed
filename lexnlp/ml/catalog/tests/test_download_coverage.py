@@ -131,9 +131,7 @@ class TestGithubTimeout:
 class TestNormaliseRepoUrl:
     def test_https_url_gains_trailing_slash(self) -> None:
         assert (
-            download._normalise_repo_url(
-                "https://api.github.com/repos/reviewed/models/releases/tags"
-            )
+            download._normalise_repo_url("https://api.github.com/repos/reviewed/models/releases/tags")
             == "https://api.github.com/repos/reviewed/models/releases/tags/"
         )
 
@@ -141,9 +139,7 @@ class TestNormaliseRepoUrl:
         with pytest.raises(download.AssetTrustError, match="absolute HTTPS URL"):
             download._normalise_repo_url("http://api.github.com/repos/reviewed/models/releases/tags/")
         with pytest.raises(download.AssetTrustError, match="absolute HTTPS URL"):
-            download._normalise_repo_url(
-                "https://user:pass@api.github.com/repos/reviewed/models/releases/tags/"
-            )
+            download._normalise_repo_url("https://user:pass@api.github.com/repos/reviewed/models/releases/tags/")
 
 
 class TestConfiguredModelsRepo:
@@ -156,8 +152,7 @@ class TestConfiguredModelsRepo:
             "https://api.github.com/repos/legacy/download-module/releases/tags",
         )
         assert (
-            download._configured_models_repo()
-            == "https://api.github.com/repos/legacy/download-module/releases/tags/"
+            download._configured_models_repo() == "https://api.github.com/repos/legacy/download-module/releases/tags/"
         )
 
     def test_legacy_assignment_already_slashed(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -194,9 +189,7 @@ class TestLoadAssetManifest:
             models_repo_slug="reviewed/models",
         )
         manifest = download.load_asset_manifest(manifest_path)
-        assert manifest.models_repo == (
-            "https://api.github.com/repos/reviewed/models/releases/tags/"
-        )
+        assert manifest.models_repo == ("https://api.github.com/repos/reviewed/models/releases/tags/")
         trusted = manifest.get("pipeline/example/1")
         assert trusted.filename == "model.bin"
         assert trusted.size == len(b"reviewed")

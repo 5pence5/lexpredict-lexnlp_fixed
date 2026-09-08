@@ -278,36 +278,20 @@ class TestSplitLinesOrdinalAndSequence:
         assert promoted == {2, 3}
 
     def test_statute_letter_sequence_promotes_parenthetical_headings(self) -> None:
-        text = (
-            "1(a) Alpha heading\n"
-            "body of alpha\n"
-            "1(b) Beta heading\n"
-            "body of beta\n"
-        )
+        text = "1(a) Alpha heading\nbody of alpha\n1(b) Beta heading\nbody of beta\n"
         hierarchy = segment_document(text, structure_profile=StructureProfile.STATUTE, **backends())
         labels = [node.label for node in hierarchy.segments(SegmentKind.SECTION)]
         assert labels == ["1(a) Alpha heading", "1(b) Beta heading"]
 
     def test_statute_non_ordinal_parenthetical_is_not_a_heading(self) -> None:
-        text = (
-            "1(aa) Wide heading\n"
-            "body of wide\n"
-            "1(ab) Other heading\n"
-            "body of other\n"
-        )
+        text = "1(aa) Wide heading\nbody of wide\n1(ab) Other heading\nbody of other\n"
         hierarchy = segment_document(text, structure_profile=StructureProfile.STATUTE, **backends())
         assert list(hierarchy.segments(SegmentKind.SECTION)) == []
 
 
 class TestOutlineTablesAndStructuralSpans:
     def test_outline_tracks_active_section_while_collecting_list_items(self) -> None:
-        text = (
-            "SECTION 1 First\n"
-            "intro\n"
-            "SECTION 2 Second\n"
-            "(a) nested item\n"
-            "1.1 Follow-on clause\n"
-        )
+        text = "SECTION 1 First\nintro\nSECTION 2 Second\n(a) nested item\n1.1 Follow-on clause\n"
         lines = _split_lines(text)
         _blocks, table_lines = _delimited_blocks(lines)
         sections, heading_lines = _section_spans(
@@ -325,12 +309,7 @@ class TestOutlineTablesAndStructuralSpans:
         assert second.start <= item.start < item.end <= second.end
 
     def test_section_then_list_items_are_nested(self) -> None:
-        text = (
-            "SECTION 1 General\n"
-            "The following items apply.\n"
-            "(a) first condition\n"
-            "(b) second condition\n"
-        )
+        text = "SECTION 1 General\nThe following items apply.\n(a) first condition\n(b) second condition\n"
         hierarchy = segment_document(text, **backends())
         sections = list(hierarchy.segments(SegmentKind.SECTION))
         items = list(hierarchy.segments(SegmentKind.LIST_ITEM))
@@ -341,14 +320,7 @@ class TestOutlineTablesAndStructuralSpans:
         assert hierarchy.reconstruct() == text
 
     def test_table_in_second_section_skips_closed_container(self) -> None:
-        text = (
-            "SECTION 1 First\n"
-            "intro only\n"
-            "SECTION 2 Second\n"
-            "Item | Price | Qty\n"
-            "A | 1 | 2\n"
-            "B | 3 | 4\n"
-        )
+        text = "SECTION 1 First\nintro only\nSECTION 2 Second\nItem | Price | Qty\nA | 1 | 2\nB | 3 | 4\n"
         hierarchy = segment_document(text, **backends())
         sections = list(hierarchy.segments(SegmentKind.SECTION))
         tables = list(hierarchy.segments(SegmentKind.TABLE))
@@ -382,10 +354,7 @@ class TestOutlineTablesAndStructuralSpans:
             _validate_structural_spans((StructuralSpan(SegmentKind.SECTION, 0, 11),), 10)
 
     def test_structural_span_depth_limit(self) -> None:
-        spans = tuple(
-            StructuralSpan(SegmentKind.SECTION, 0, 200 - index)
-            for index in range(MAX_HIERARCHY_DEPTH + 1)
-        )
+        spans = tuple(StructuralSpan(SegmentKind.SECTION, 0, 200 - index) for index in range(MAX_HIERARCHY_DEPTH + 1))
         with pytest.raises(ValueError, match="structural spans exceed MAX_HIERARCHY_DEPTH"):
             _validate_structural_spans(spans, 200)
 

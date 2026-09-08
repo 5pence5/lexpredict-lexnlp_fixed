@@ -10,10 +10,9 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol, TypeAlias, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
-
-SentenceSpan: TypeAlias = tuple[int, int, str]
+type SentenceSpan = tuple[int, int, str]
 
 
 @runtime_checkable
@@ -39,17 +38,13 @@ def parts_to_spans(text: str, parts: Iterable[str]) -> tuple[SentenceSpan, ...]:
             raise ValueError(f"segment {index} is empty")
         end = cursor + len(part)
         if text[cursor:end] != part:
-            raise ValueError(
-                "sentence backend did not preserve the input exactly at "
-                f"segment {index}, offset {cursor}"
-            )
+            raise ValueError(f"sentence backend did not preserve the input exactly at segment {index}, offset {cursor}")
         spans.append((cursor, end, part))
         cursor = end
 
     if cursor != len(text):
         raise ValueError(
-            "sentence backend did not cover the complete input: "
-            f"covered {cursor} of {len(text)} characters"
+            f"sentence backend did not cover the complete input: covered {cursor} of {len(text)} characters"
         )
     return tuple(spans)
 
@@ -70,9 +65,7 @@ class SaTSentenceSegmenter:
         if not callable(getattr(self.model, "split", None)):
             raise TypeError("model must provide a callable split(text, **kwargs) method")
         if not isinstance(self.backend_id, str) or not self.backend_id.strip():
-            raise ValueError(
-                "backend_id must be a non-empty caller-pinned model and config identity"
-            )
+            raise ValueError("backend_id must be a non-empty caller-pinned model and config identity")
         self.split_kwargs = dict(self.split_kwargs)
 
     def __call__(self, text: str) -> Iterator[SentenceSpan]:

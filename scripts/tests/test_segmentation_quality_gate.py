@@ -1,7 +1,6 @@
 # QUALITY_BLOB_RECONSTRUCTION_V3
 from __future__ import annotations
 
-import copy
 import json
 
 import pytest
@@ -10,10 +9,7 @@ from scripts import segmentation_quality_gate as gate
 
 
 def _external_payload():
-    text = (
-        "1. TERM\nThe agreement lasts for three years.\n\n"
-        "2. PRICE\nThe annual price is £12,500 plus VAT.\n"
-    )
+    text = "1. TERM\nThe agreement lasts for three years.\n\n2. PRICE\nThe annual price is £12,500 plus VAT.\n"
     answer = "The annual price is £12,500 plus VAT."
     start = text.index(answer)
     return {
@@ -51,9 +47,7 @@ def _bound_external_payload():
             item["index"],
         ),
     )
-    payload["documents"][0]["queries"][0]["ranked_chunk_ids"] = [
-        item["chunk_id"] for item in ranked
-    ]
+    payload["documents"][0]["queries"][0]["ranked_chunk_ids"] = [item["chunk_id"] for item in ranked]
     payload["ranking_provenance"] = {
         "schema_version": 1,
         "retriever_id": "synthetic-lexical-regression",
@@ -87,9 +81,7 @@ def test_default_gate_is_deterministic_and_reports_bounded_scope():
     # The frozen retrieval fixture has 1,030 indexed characters across 13
     # chunks over 982 source characters.
     assert first["packing"]["mean_chunk_characters"] == pytest.approx(1030 / 13)
-    assert first["packing"]["index_character_amplification"] == pytest.approx(
-        1030 / 982
-    )
+    assert first["packing"]["index_character_amplification"] == pytest.approx(1030 / 982)
     digest_fields = [key for key in first["evidence"] if key.endswith("_sha256")]
     assert len(digest_fields) == 7
     assert all(len(first["evidence"][key]) == 64 for key in digest_fields)
@@ -183,14 +175,9 @@ def test_trivial_whole_document_chunking_fails_context_or_size_guardrail():
 
 
 def test_overlap_amplification_is_an_explicit_gate_not_hidden_in_recall():
-    report = gate.run_quality_gate(
-        thresholds={"max_index_character_amplification": 1.0}
-    )
+    report = gate.run_quality_gate(thresholds={"max_index_character_amplification": 1.0})
     assert not report["passed"]
-    assert any(
-        failure["check"] == "index_character_amplification"
-        for failure in report["failures"]
-    )
+    assert any(failure["check"] == "index_character_amplification" for failure in report["failures"])
 
 
 @pytest.mark.parametrize("output_flag", ["--output", "--json-output"])
@@ -198,15 +185,18 @@ def test_prepare_external_cli_emits_candidates_without_accepting_rankings(tmp_pa
     manifest = tmp_path / "external.json"
     output = tmp_path / "nested" / "prepared.json"
     manifest.write_text(json.dumps(_external_payload()), encoding="utf-8")
-    assert gate.main(
-        [
-            "--external-manifest",
-            str(manifest),
-            "--prepare-external",
-            output_flag,
-            str(output),
-        ]
-    ) == 0
+    assert (
+        gate.main(
+            [
+                "--external-manifest",
+                str(manifest),
+                "--prepare-external",
+                output_flag,
+                str(output),
+            ]
+        )
+        == 0
+    )
     prepared = json.loads(output.read_text(encoding="utf-8"))
     assert prepared["candidates"][0]["chunks"]
     assert "candidate_set_sha256" in prepared

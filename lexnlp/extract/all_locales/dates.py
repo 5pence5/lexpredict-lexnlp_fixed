@@ -42,9 +42,7 @@ def get_date_annotations(
     # locale, so this dispatcher was unusable outside English. Pass by name and
     # only forward what each routine accepts.
     if language == LANG_EN.code:
-        yield from routine(
-            text=text, strict=strict, locale=locale, base_date=base_date, threshold=threshold
-        )
+        yield from routine(text=text, strict=strict, locale=locale, base_date=base_date, threshold=threshold)
     else:
         # These parsers read attributes off a Locale, not a language string,
         # and declare ``strict: bool = True``. Forwarding the dispatcher's

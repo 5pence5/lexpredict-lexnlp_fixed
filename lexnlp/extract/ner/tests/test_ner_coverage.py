@@ -57,12 +57,8 @@ class TestSpacyExtract:
             matches = _spacy_extract("John Doe works at Acme Corp")
         assert len(matches) == 2
         first, second = matches
-        assert first == HybridNERMatch(
-            start=0, end=8, text="John Doe", label="PERSON", backend="spacy"
-        )
-        assert second == HybridNERMatch(
-            start=20, end=29, text="Acme Corp", label="ORG", backend="spacy"
-        )
+        assert first == HybridNERMatch(start=0, end=8, text="John Doe", label="PERSON", backend="spacy")
+        assert second == HybridNERMatch(start=20, end=29, text="Acme Corp", label="ORG", backend="spacy")
         assert all(m.backend == "spacy" for m in matches)
 
     def test_no_entities_returns_empty_list(self) -> None:

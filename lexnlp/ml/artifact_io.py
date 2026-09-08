@@ -6,9 +6,9 @@ import os
 import pickle
 import stat
 import tempfile
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from collections.abc import Iterator
 
 
 @contextmanager
@@ -16,15 +16,9 @@ def atomic_output_path(destination: Path) -> Iterator[Path]:
     """Yield a sibling temporary path and atomically publish it on success."""
     destination = Path(destination)
     if destination.is_symlink():
-        raise ValueError(
-            f"Refusing to replace a model artifact symlink: {destination}"
-        )
+        raise ValueError(f"Refusing to replace a model artifact symlink: {destination}")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination_mode = (
-        stat.S_IMODE(destination.stat().st_mode)
-        if destination.exists()
-        else 0o644
-    )
+    destination_mode = stat.S_IMODE(destination.stat().st_mode) if destination.exists() else 0o644
     file_descriptor, temporary_name = tempfile.mkstemp(
         dir=destination.parent,
         prefix=f".{destination.name}.",
@@ -36,9 +30,7 @@ def atomic_output_path(destination: Path) -> Iterator[Path]:
     try:
         yield temporary_path
         if not temporary_path.is_file() or temporary_path.stat().st_size == 0:
-            raise RuntimeError(
-                f"Refusing to publish an empty model artifact: {temporary_path}"
-            )
+            raise RuntimeError(f"Refusing to publish an empty model artifact: {temporary_path}")
         os.chmod(temporary_path, destination_mode)
         with temporary_path.open("rb") as temporary_file:
             os.fsync(temporary_file.fileno())

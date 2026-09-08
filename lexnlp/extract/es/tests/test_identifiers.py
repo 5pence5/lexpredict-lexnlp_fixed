@@ -122,8 +122,7 @@ class TestGetNifAnnotations(TestCase):
 class TestGetIdentifierAnnotations(TestCase):
     def test_extracts_all_kinds(self):
         text = (
-            "El consumidor con DNI 12345678Z y la sociedad CIF A12345674. "
-            "El residente con NIE X1234567L también firma."
+            "El consumidor con DNI 12345678Z y la sociedad CIF A12345674. El residente con NIE X1234567L también firma."
         )
         results = list(get_identifier_annotations(text))
         kinds = sorted(r.kind for r in results)
@@ -133,11 +132,9 @@ class TestGetIdentifierAnnotations(TestCase):
         self.assertEqual([], list(get_identifier_annotations("")))
 
     def test_dataclass_is_frozen(self):
-        m = EsIdentifierMatch(
-            kind="dni", value="12345678Z", surface="12345678Z", coords=(0, 9)
-        )
+        m = EsIdentifierMatch(kind="dni", value="12345678Z", surface="12345678Z", coords=(0, 9))
         with self.assertRaises(dataclasses.FrozenInstanceError):
-            setattr(m, "value", "00000000T")
+            m.value = "00000000T"
 
 
 class TestEsIdentifiersPackageReexports(TestCase):

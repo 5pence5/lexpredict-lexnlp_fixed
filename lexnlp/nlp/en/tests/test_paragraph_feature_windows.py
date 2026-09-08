@@ -81,7 +81,9 @@ class TestParagraphFeatureWindowIsCoupledToTheBundledModel(TestCase):
         lines = [f"line {index}" for index in range(lines_count)]
 
         name_offsets = set(
-            _offsets(get_paragraph_break_feature_names(lines_count=lines_count, line_window_pre=pre, line_window_post=post))
+            _offsets(
+                get_paragraph_break_feature_names(lines_count=lines_count, line_window_pre=pre, line_window_post=post)
+            )
         )
 
         for line_id in range(lines_count):
