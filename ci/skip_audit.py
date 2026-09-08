@@ -149,7 +149,10 @@ def collect_markers(repo_root: Path) -> tuple[list[Marker], list[str]]:
 
             key = (node.lineno, node.col_offset, kind)
             if key in seen:
-                continue
+                # Defensive only: real parsed source cannot produce two kept markers
+                # with the same (line, col, kind), because a marker call's func
+                # attribute (the only node sharing its position) is suppressed above.
+                continue  # pragma: no cover
             seen.add(key)
 
             expression = ast.get_source_segment(source, node) or kind
