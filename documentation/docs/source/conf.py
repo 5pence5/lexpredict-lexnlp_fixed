@@ -34,8 +34,8 @@ root_doc = "index"
 language = "en"
 
 # ``api/`` is an obsolete sphinx-apidoc snapshot containing removed modules,
-# tests, and one-page-per-constant output. The curated public API reference
-# lives under ``modules/api/``.
+# tests, and one-page-per-constant output. Keep the existing extraction and NLP
+# guides as the supported reference for this maintenance upgrade.
 exclude_patterns = ["api/**", "build/**"]
 
 pygments_style = "sphinx"

@@ -12,7 +12,7 @@ import pytest
 
 
 SCRIPT_MODULES = [
-    "reexport_contract_model", "model_quality_gate", "contract_type_quality_gate", "train_contract_model",
+    "reexport_contract_model", "model_quality_gate", "contract_type_quality_gate",
 ]
 
 

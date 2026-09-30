@@ -79,19 +79,11 @@ You can explicitly select a tag at runtime:
 export LEXNLP_CONTRACT_TYPE_MODEL_TAG="pipeline/contract-type/0.2-runtime"
 ```
 
-### Bootstrap / Training
+### Runtime bootstrap
 
 Build (or reuse) the runtime-compatible contract-type model from the released
 corpus tag `corpus/contract-types/0.1`:
 
 ```bash
 python scripts/bootstrap_assets.py --contract-type-model
-```
-
-Train explicitly and write a training summary report:
-
-```bash
-python scripts/train_contract_type_model.py \
-  --target-tag pipeline/contract-type/0.2-runtime \
-  --output-json artifacts/model_training/contract_type_model_training_report.json
 ```

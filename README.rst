@@ -56,11 +56,8 @@ LexNLP deliberately keeps four kinds of supporting resources distinct:
 
       .venv/bin/python scripts/bootstrap_assets.py --nltk
 
-3. **Pipeline classifiers** are reproducibly derived from trusted inputs. The
-   is-contract bootstrap uses the pinned ``0.1`` release as its trusted source
-   and downloads ``0.2`` when published; before publication it re-exports a
-   local ``0.2`` candidate. The contract-type bootstrap builds or reuses the
-   runtime model from a pinned corpus:
+3. **Pipeline classifiers** are downloaded or migrated from pinned, trusted
+   release/corpus inputs for the upgraded runtime:
 
    .. code-block:: bash
 
@@ -112,8 +109,7 @@ Stanford-gated tests are a separate, explicitly provisioned suite:
 
 See `MIGRATION_RUNBOOK.md
 <https://github.com/LexPredict/lexpredict-lexnlp/blob/master/MIGRATION_RUNBOOK.md>`__
-for clean-environment, packaging, model-quality, and release validation
-procedures.
+for clean-environment, packaging, model migration, and quality checks.
 
 Dependency auditing retains a known NLTK 3.10.3 vulnerability under a scoped,
 time-limited applicability exception. The runbook documents the affected APIs,

@@ -100,6 +100,6 @@ you intend to keep. Read the Docs uses the locked ``docs`` extra.
 
 See ``MIGRATION_RUNBOOK.md`` in the repository for clean distribution installs,
 the exact Python 3.12.13 model-producer ABI, strict quality thresholds, custom
-asset locations, and release procedures. The runtime dependency stack and
+asset locations, and model migration. The runtime dependency stack and
 model-producer stack have separate purposes; never produce release model
 bytes under an arbitrary newer numerical ABI.
