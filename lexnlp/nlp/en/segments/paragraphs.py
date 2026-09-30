@@ -23,11 +23,11 @@ from re import Pattern, compile as re_compile
 from typing import Dict, Final, Generator, List, Set, Tuple, Union, Optional
 
 # third-party imports
-import joblib
 from pandas import DataFrame
 
 # LexNLP
 from lexnlp.nlp.en.segments.utils import build_document_line_distribution
+from lexnlp.utils.unpickler import load_joblib_model
 
 
 # Setup module path
@@ -36,7 +36,9 @@ from lexnlp.nlp.en.segments.utils import build_document_line_distribution
 MODULE_PATH = os.path.dirname(os.path.abspath(__file__))
 
 # Load segmenters
-PARAGRAPH_SEGMENTER_MODEL: Final = joblib.load(os.path.join(MODULE_PATH, "./paragraph_segmenter.pickle"))
+PARAGRAPH_SEGMENTER_MODEL: Final = load_joblib_model(
+    os.path.join(MODULE_PATH, "./paragraph_segmenter.pickle")
+)
 
 # regular expression for newlines
 RE_NEW_LINE: Final[Pattern] = re_compile(r'(?P<line>[^\r\n]*)((\r\n)|(\n\r)|\n|\r)')
@@ -241,7 +243,8 @@ def get_paragraph_spans(
     feature_df: DataFrame = DataFrame(feature_data, columns=column_names).fillna(-1).astype(int)
 
     try:
-        predicted_lines = PARAGRAPH_SEGMENTER_MODEL.predict_proba(feature_df)
+        # Avoid pandas dtype deprecation noise in sklearn validation by passing a numpy array.
+        predicted_lines = PARAGRAPH_SEGMENTER_MODEL.predict_proba(feature_df.to_numpy())
         predicted_df: DataFrame = DataFrame(predicted_lines, columns=["prob_false", "prob_true"])
         paragraph_breaks = predicted_df.loc[predicted_df["prob_true"] >= score_threshold, :].index.tolist()
 

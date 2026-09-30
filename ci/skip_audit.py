@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import ast
 import datetime as dt
+import hashlib
 import re
 import subprocess
 import sys
@@ -37,7 +38,15 @@ class Marker:
 
     @property
     def key(self) -> str:
+        # Legacy allowlist key (deprecated): line-number based.
         return f"{self.path.as_posix()}:{self.line}:{self.kind}"
+
+    @property
+    def stable_key(self) -> str:
+        # Stable allowlist key: resilient to line movements and formatting changes
+        # outside the marker expression itself.
+        digest = hashlib.sha256(self.expression.encode("utf-8")).hexdigest()[:12]
+        return f"{self.path.as_posix()}:{self.kind}:sha256={digest}"
 
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
@@ -55,6 +64,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--allowlist",
         default="ci/skip_audit_allowlist.txt",
         help="Allowlist path (relative to repo root unless absolute).",
+    )
+    parser.add_argument(
+        "--print-markers",
+        action="store_true",
+        help="Print detected skip markers and exit (useful for allowlisting).",
     )
     return parser.parse_args(argv)
 
@@ -199,13 +213,18 @@ def main(argv: Sequence[str]) -> int:
             print(f"  - {parse_error}", file=sys.stderr)
         return 1
 
+    if args.print_markers:
+        for marker in markers:
+            print(f"{marker.key} stable={marker.stable_key} expr={marker.expression}")
+        return 0
+
     files_cache: Dict[Path, List[str]] = {}
     today = dt.date.today()
     violations: List[str] = []
     allowlisted_count = 0
 
     for marker in markers:
-        if marker.key in allowlist:
+        if marker.key in allowlist or marker.stable_key in allowlist:
             allowlisted_count += 1
             continue
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
@@ -17,13 +18,21 @@ DEFAULT_FIXTURE = Path(
 REQUIRED_METRIC_KEYS = ("accuracy", "f1", "precision", "recall")
 
 
+def resolve_contract_model_tag() -> str:
+    return (
+        os.getenv("LEXNLP_CONTRACT_MODEL_TAG")
+        or os.getenv("LEXNLP_IS_CONTRACT_MODEL_TAG")
+        or "pipeline/is-contract/0.1"
+    ).strip()
+
+
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare baseline and candidate contract models on a labeled fixture.",
     )
     parser.add_argument(
         "--baseline-tag",
-        default="pipeline/is-contract/0.1",
+        default=resolve_contract_model_tag(),
         help="Catalog tag used as baseline model.",
     )
     parser.add_argument(
@@ -115,22 +124,20 @@ def load_fixture(path: Path) -> Tuple[List[str], List[bool]]:
 
 
 def ensure_tag_downloaded(tag: str) -> Path:
-    from lexnlp.ml.catalog import get_path_from_catalog
-    from lexnlp.ml.catalog.download import download_github_release
+    if __package__:
+        from ._model_assets import ensure_tag_downloaded as ensure_verified_tag
+    else:
+        from _model_assets import ensure_tag_downloaded as ensure_verified_tag
 
-    try:
-        return get_path_from_catalog(tag)
-    except FileNotFoundError:
-        download_github_release(tag, prompt_user=False)
-        return get_path_from_catalog(tag)
+    return ensure_verified_tag(tag)
 
 
 def load_pipeline_for_tag(tag: str):
-    from cloudpickle import load
+    from lexnlp.utils.unpickler import load_sklearn_model
 
     model_path = ensure_tag_downloaded(tag)
     with model_path.open("rb") as model_file:
-        return load(model_file)
+        return load_sklearn_model(model_file)
 
 
 def score_pipeline(pipeline, texts: List[str], labels: List[bool], min_probability: float) -> Dict[str, float]:

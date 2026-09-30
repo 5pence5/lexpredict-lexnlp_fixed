@@ -1,180 +1,203 @@
 # AGENTS.md
 
-This document is a quick-start guide for coding agents working in this repository.
+This is the quick-start and validation policy for coding agents working on
+LexNLP.
 
-## Project Summary
+## Project baseline
 
-- Project: `lexpredict-lexnlp` (LexNLP)
-- Purpose: legal-text NLP and information extraction library
-- Primary package: `lexnlp/`
-- Packaging: `pyproject.toml` (setuptools backend; version in repo: `2.3.0`)
-- Python requirement in `pyproject.toml`: `>=3.10,<3.13` (default to Python `3.11`)
+- Package: `lexnlp/`
+- Packaging and dependency source of truth: `pyproject.toml` + `uv.lock`
+- Supported Python: 3.10–3.13 (`>=3.10,<3.14`)
+- Default development/docs interpreter: Python 3.12
+- CI: `.github/workflows/`
+- Sphinx source: `documentation/docs/source/`
 
-## Directory Structure
+Do not reintroduce Pipenv, split `python-requirements*.txt` snapshots, Travis
+CI, or the deprecated `readthedocs.yml` filename.
+
+## Repository map
 
 ```text
-.
-|-- lexnlp/                     # Main package
-|   |-- config/                 # Locale-specific configuration (en, de, es)
-|   |-- extract/                # Extraction modules by locale and domain
-|   |   |-- common/
-|   |   |-- en/
-|   |   |-- de/
-|   |   |-- es/
-|   |   `-- ml/
-|   |-- ml/                     # ML utilities/catalog helpers
-|   |-- nlp/                    # NLP components and training helpers
-|   |-- tests/                  # Shared test helpers + tests
-|   `-- utils/                  # Utility modules and utility tests
-|-- test_data/                  # Fixtures, sample inputs, expected outputs
-|-- scripts/                    # Helper scripts (Tika, release, data helpers)
-|-- libs/                       # Download/runtime helper scripts and assets
-|-- notebooks/                  # Exploratory notebooks by topic
-|-- documentation/              # Sphinx docs source
-|-- pyproject.toml              # Canonical packaging/dependency metadata
-|-- python-requirements.txt     # Deprecated legacy dependency snapshot
-|-- python-requirements-dev.txt # Deprecated legacy dev/test snapshot
-|-- Pipfile                     # Deprecated legacy pipenv workflow
-|-- .pylintrc                   # Lint configuration
-|-- .travis.yml                 # Historical CI reference
-|-- setup.py                    # Legacy compatibility wrapper
-`-- AGENTS.md
+lexnlp/                     Runtime package
+  config/                   Locale configuration
+  extract/                  Extraction modules (common, en, de, es, ml)
+  ml/                       Model utilities and verified release catalog
+  nlp/                      NLP components and training helpers
+  tests/                    Shared test infrastructure
+  utils/                    Runtime utilities
+test_data/                  Fixtures and fixed quality-gate baselines
+scripts/                    Asset, model, release, and validation tooling
+ci/                         Distribution and test-policy checks
+constraints/                Reproducible model-producer ABI
+documentation/docs/source/  Sphinx documentation
 ```
 
-## Environment Setup (Recommended: uv)
+## Reproducible setup
 
-Use Python 3.11 in a local `.venv`.
+Run from a clone of this repository; commands must not depend on a personal
+filesystem path.
 
 ```bash
-cd /Users/jackeames/Downloads/LexNLP
-uv python install 3.11
-uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -e ".[dev,test]"
+uv python install 3.12
+uv sync --frozen --python 3.12 --extra dev --extra test
+uv pip check --python .venv/bin/python
 ```
 
-### Deprecated setup variants
+`uv sync` creates `.venv` and installs the project editable. Do not hand-edit
+`uv.lock`; update it with `uv lock` after an intentional `pyproject.toml`
+change.
 
-`Pipfile`, `python-requirements.txt`, and `python-requirements-dev.txt` are deprecated. Use `uv` with `pyproject.toml` for all new local setup and CI updates.
+## Assets and external services
 
-## Required Runtime/Test Assets
+These resource classes are intentionally separate:
 
-Use the bootstrap script for deterministic setup:
+- Bundled sklearn/joblib models are distribution files and require no
+  bootstrap.
+- NLTK corpora are external data:
+
+  ```bash
+  .venv/bin/python scripts/bootstrap_assets.py --nltk
+  ```
+
+- Pipeline classifiers are derived from trusted sources. Is-contract uses the
+  pinned `0.1` release as its source, downloads `0.2` when published, and
+  otherwise creates a local `0.2` re-export. Contract-type builds or reuses
+  its runtime artifact from a pinned corpus:
+
+  ```bash
+  .venv/bin/python scripts/bootstrap_assets.py \
+    --contract-model \
+    --contract-type-model
+  ```
+
+- Stanford NLP is optional, Java-dependent, and test-gated:
+
+  ```bash
+  .venv/bin/python scripts/bootstrap_assets.py --stanford
+  ```
+
+  The default install is `stanford_nlp/` under NLTK's selected data directory.
+  Runtime discovery searches `nltk.data.path`, then supported legacy locations.
+  A custom `--stanford-dir` must be explicitly covered by `NLTK_DATA`; never
+  add arbitrary download directories to the runtime trust path automatically.
+
+- Apache Tika 3.3.2 is an optional out-of-process Java service. The secure
+  bootstrap installs the pinned app and server-standard jars; the launcher
+  binds to loopback:
+
+  ```bash
+  .venv/bin/python scripts/bootstrap_assets.py --tika
+  LEXNLP_USE_TIKA=true scripts/run_tika.sh
+  ```
+
+Never replace the verified Stanford, Tika, model, or corpus bootstrap with an
+unpinned download or commit downloaded third-party asset trees. NLTK resources
+come from the official `nltk_data` repository, use a separate pinned SHA-256
+catalog (including `omw-1.4` and `omw-2.0`), and are not covered by the
+model/corpus release-asset manifest.
+
+## Model compatibility and quality policy
+
+Persisted models are executable pickle/joblib data. Load only artifacts from a
+trusted release or producer.
+
+Models must be serialized with the exact oldest supported producer stack in
+`constraints/model-artifact-abi.txt`, including Python 3.12.13:
+
+- joblib 1.5.0
+- NumPy 1.26.4
+- pandas 2.2.0
+- scikit-learn 1.7.2
+- SciPy 1.13.0
+- threadpoolctl 3.6.0
+
+Every produced artifact must then direct-load and pass the same fixed-fixture
+quality gate with the latest locked dependency stack. Never build a release
+artifact only under the latest NumPy ABI.
+
+The quality policy is strict non-regression: every maximum regression argument
+remains `0.0`. Do not refresh baseline metrics merely to make a weaker model
+pass.
 
 ```bash
-./.venv/bin/python scripts/bootstrap_assets.py --nltk --contract-model
+.venv/bin/python scripts/reexport_bundled_sklearn_models.py --check-current
+
+.venv/bin/python scripts/model_quality_gate.py \
+  --baseline-tag pipeline/is-contract/0.1 \
+  --candidate-tag pipeline/is-contract/0.2 \
+  --baseline-metrics-json test_data/model_quality/is_contract_baseline_metrics.json \
+  --max-accuracy-regression 0.0 \
+  --max-f1-regression 0.0
+
+.venv/bin/python scripts/contract_type_quality_gate.py \
+  --baseline-tag pipeline/contract-type/0.2-runtime \
+  --candidate-tag pipeline/contract-type/0.2-runtime \
+  --baseline-metrics-json test_data/model_quality/contract_type_baseline_metrics.json \
+  --max-accuracy-top1-regression 0.0 \
+  --max-accuracy-topn-regression 0.0 \
+  --max-f1-macro-regression 0.0 \
+  --max-f1-weighted-regression 0.0
 ```
 
-Optional assets:
+## Test-integrity policy
+
+- Do not add, remove, or alter `skip`, `skipif`, or `xfail` to conceal a
+  failure.
+- Required suites must pass completely.
+- A genuinely necessary marker requires an inline
+  `skip-audit: issue=<link-or-id> expires=YYYY-MM-DD` annotation.
+- `ci/skip_audit_allowlist.txt` is reserved for cases that cannot be annotated.
+
+## Validation
+
+Run targeted tests while iterating, then the required checks:
 
 ```bash
-# Stanford
-./.venv/bin/python scripts/bootstrap_assets.py --stanford
-
-# Tika
-./.venv/bin/python scripts/bootstrap_assets.py --tika
+.venv/bin/ruff check lexnlp scripts ci --select E4,E7,E9,F
+.venv/bin/python ci/skip_audit.py
+.venv/bin/python scripts/reexport_bundled_sklearn_models.py --check-current
+.venv/bin/pytest lexnlp scripts/tests
 ```
 
-## Stanford-Dependent Tests
+Run the optional Stanford suite after installing its verified assets and Java:
 
-Stanford tests are gated by `LEXNLP_USE_STANFORD=true`.
-
-1. Install Java:
 ```bash
-brew install openjdk
-```
-
-2. Ensure Java is on path for test commands:
-```bash
-export PATH="/opt/homebrew/opt/openjdk/bin:$PATH"
-```
-
-3. Download Stanford assets to `libs/stanford_nlp`:
-- `stanford-postagger-full-2017-06-09`
-- `stanford-ner-2017-06-09`
-
-Expected files:
-- `libs/stanford_nlp/stanford-postagger-full-2017-06-09/stanford-postagger.jar`
-- `libs/stanford_nlp/stanford-postagger-full-2017-06-09/models/english-bidirectional-distsim.tagger`
-- `libs/stanford_nlp/stanford-ner-2017-06-09/stanford-ner.jar`
-- `libs/stanford_nlp/stanford-ner-2017-06-09/classifiers/english.all.3class.distsim.crf.ser.gz`
-
-## Tika Notes
-
-`scripts/download_tika.sh` can fail on macOS because it assumes GNU `mkdir --parents` and `wget`.
-If needed, manually download `tika-app-1.16.jar` and `tika-server-1.16.jar` into `bin/` using `curl`.
-
-Migration and troubleshooting details are in `MIGRATION_RUNBOOK.md`.
-
-## Test Integrity Policy
-
-- Do not add, remove, or modify `skip`, `skipif`, or `xfail` markers to bypass failures.
-- Fix failing behavior or document a real external blocker; never mask regressions by changing skip behavior.
-- Validation target is **100% pass** for required suites.
-
-## Full Validation Commands (100% pass target)
-
-Run in two phases:
-
-1. Base suite:
-```bash
-./.venv/bin/pytest lexnlp
-```
-
-2. Stanford-only suite:
-```bash
-PATH=/opt/homebrew/opt/openjdk/bin:$PATH \
-LEXNLP_USE_STANFORD=true \
-./.venv/bin/pytest \
+LEXNLP_USE_STANFORD=true .venv/bin/pytest \
   lexnlp/nlp/en/tests/test_stanford.py \
   lexnlp/extract/en/entities/tests/test_stanford_ner.py
 ```
 
-When Stanford assets are installed and enabled, both phases must pass (0 failures) for a **100% pass** result.
-
-Note: a single monolithic `LEXNLP_USE_STANFORD=true` run can occasionally hang in non-Stanford modules on this machine, so prefer the two-phase approach.
-
-## Common Commands
+Validate distributions in clean environments:
 
 ```bash
-# quick dependency sanity
-./.venv/bin/pip check
-
-# packaging content sanity
-python3 ci/check_dist_contents.py
-
-# contract model quality gate (baseline metrics)
-./.venv/bin/python scripts/model_quality_gate.py \
-  --baseline-tag pipeline/is-contract/0.1 \
-  --candidate-tag pipeline/is-contract/0.1 \
-  --baseline-metrics-json test_data/model_quality/is_contract_baseline_metrics.json
-
-# create a re-exported candidate model tag and validate it
-./.venv/bin/python scripts/reexport_contract_model.py \
-  --source-tag pipeline/is-contract/0.1 \
-  --target-tag pipeline/is-contract/0.2 \
-  --baseline-metrics-json test_data/model_quality/is_contract_baseline_metrics.json
-
-# run one file
-./.venv/bin/pytest lexnlp/extract/en/tests/test_dates.py
-
-# historical CI-style command
-./.venv/bin/pytest --cov lexnlp --pylint --pylint-rcfile=.pylintrc lexnlp
+uv build
+.venv/bin/python ci/check_dist_contents.py
 ```
 
-## Implementation Guidelines
+Build documentation with warnings fatal:
 
-- Keep changes scoped to the relevant locale/module (`extract/en`, `extract/de`, etc.).
-- Add or update tests alongside behavior changes.
-- Prefer existing utilities under `lexnlp/utils/` over introducing duplicates.
-- When adding extraction patterns/models, include representative fixtures in `test_data/`.
-- Avoid committing downloaded/generated third-party assets unless explicitly required.
+```bash
+uv sync --frozen --python 3.12 --extra dev --extra test --extra docs
+.venv/bin/sphinx-build -W --keep-going \
+  -b html documentation/docs/source documentation/docs/build/html
+```
 
-## Pull Request Checklist
+## Implementation and PR checklist
 
-- Editable install works: `uv pip install --python .venv/bin/python -e ".[dev,test]"`
-- Targeted tests for changed modules pass.
-- Full base run (`pytest lexnlp`) passes.
-- If Stanford assets are enabled, Stanford-only suite with `LEXNLP_USE_STANFORD=true` passes.
-- Contract model quality gate passes against `test_data/model_quality/is_contract_baseline_metrics.json`.
-- No `skip`/`skipif`/`xfail` policy bypasses were introduced.
-- Document any required asset downloads (NLTK, pipeline models, Stanford, Tika) in PR notes.
+- Preserve public signatures, return shapes, extraction quality, and
+  performance unless the change is a measured improvement.
+- Keep locale-specific work in its locale/module and add fixed fixtures for
+  behavior changes.
+- Prefer existing utilities over parallel implementations.
+- Verify the supported Python matrix when changing dependencies or
+  serialization.
+- Verify wheel and sdist contents and install both outside the source tree.
+- Record every required asset and quality/performance result in the PR.
+- Never include credentials, unverified downloads, or generated third-party
+  asset directories.
+- Retain raw dependency-audit findings. Any applicability exception must pass
+  `ci/check_dependency_audit.py` against `ci/dependency_audit_exceptions.json`;
+  version, affected source, scope, and expiry changes require review. Do not
+  describe an exception as remediation of the dependency itself.
+
+See `MIGRATION_RUNBOOK.md` for operational detail.

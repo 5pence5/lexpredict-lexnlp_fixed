@@ -1,13 +1,12 @@
-# Grandfathered Stanford skip markers.
-# Format: path:line:marker
-lexnlp/extract/en/entities/tests/test_stanford_ner.py:27:skipif
-lexnlp/extract/en/entities/tests/test_stanford_ner.py:35:skipif
-lexnlp/extract/en/entities/tests/test_stanford_ner.py:43:skipif
-lexnlp/nlp/en/tests/test_stanford.py:37:skipif
-lexnlp/nlp/en/tests/test_stanford.py:44:skipif
-lexnlp/nlp/en/tests/test_stanford.py:51:skipif
-lexnlp/nlp/en/tests/test_stanford.py:58:skipif
-lexnlp/nlp/en/tests/test_stanford.py:65:skipif
-lexnlp/nlp/en/tests/test_stanford.py:72:skipif
-lexnlp/nlp/en/tests/test_stanford.py:79:skipif
-lexnlp/nlp/en/tests/test_stanford.py:86:skipif
+# Grandfathered skip markers for pytest.
+# Formats (one per line):
+# - Preferred (stable): path:marker:sha256=<hex12>
+#   - resilient to unrelated line movements
+#   - <hex12> is the first 12 chars of sha256(normalized marker expression)
+#   - get keys via: `python ci/skip_audit.py --print-markers`
+# - Legacy (deprecated): path:line:marker
+#
+# Prefer annotations near the marker:
+#   skip-audit: issue=<link-or-id> expires=YYYY-MM-DD
+#
+# This file is reserved for rare cases where annotation is not feasible.

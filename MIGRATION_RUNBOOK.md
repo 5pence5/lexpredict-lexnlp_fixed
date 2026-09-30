@@ -1,143 +1,451 @@
-# Dependency Migration Runbook
+# Dependency and Model Migration Runbook
 
-This runbook is the operational guide for maintaining a modern, reproducible LexNLP environment with a zero-skip testing policy.
+This is the operational guide for reproducible LexNLP development, dependency
+updates, persisted-model production, and release validation.
 
-## 1) Toolchain Baseline
+## 1. Supported toolchain
 
-- Python: `3.11` (default), supported range in `pyproject.toml`: `>=3.10,<3.13`
-- Packaging/dependencies: `pyproject.toml` + `uv.lock`
-- Installer/runner: `uv`
+- Python: 3.10–3.13 (`>=3.10,<3.14`)
+- Default validation/docs interpreter: Python 3.12
+- Dependency metadata: `pyproject.toml`
+- Reproducible lock: `uv.lock`
+- Installer and runner: `uv`
+- CI: GitHub Actions
 
-Legacy files are retained for historical reproduction only:
-- `Pipfile`
-- `python-requirements.txt`
-- `python-requirements-dev.txt`
-- `python-requirements-full.txt`
+Pipenv manifests, split `python-requirements*.txt` snapshots, and Travis CI
+were removed because they described incompatible dependency graphs and
+unsupported Python versions. Do not recreate them.
 
-## 2) Fresh Setup
+The supported range is deliberately `3.10` through `3.13`:
+
+- Python 3.10 is the oldest supported interpreter and scikit-learn 1.7.2 is
+  the newest scikit-learn line that still supports it. Keeping that boundary
+  avoids dropping a still-maintained interpreter solely for a dependency
+  upgrade.
+- CI is configured to run the full Linux suite on Python 3.10, 3.11, 3.12,
+  and 3.13, plus macOS and Windows smoke checks at the 3.10 and 3.13
+  endpoints, including compiled imports and a package build. Check the
+  candidate commit's workflow results when assessing a release; the matrix
+  configuration alone does not establish that it passed.
+- Python 3.9 and older are intentionally retired. They are outside upstream
+  security support and prevent adoption of the current numerical and packaging
+  stack. This supersedes LexNLP's historical Python 3.6 baseline.
+- Python 3.14 is intentionally excluded for now. Gensim 4.4.0, which backs the
+  public Doc2Vec vectorizer and legacy contract-type detector APIs, has no
+  CPython 3.14 wheels and its extension source fails against removed
+  CPython/NumPy internals. Removing or optionalizing Gensim would reduce public
+  functionality. Revisit the upper bound when Gensim publishes compatible
+  wheels, then validate the full matrix before widening it.
+
+Gensim's Linux wheels target `manylinux_2_28`; Linux systems older than that
+glibc baseline may fall back to an unsupported source build. Use a current
+manylinux-compatible distribution or container on those hosts.
+
+Published model bytes use the exact numerical stack in
+`constraints/model-artifact-abi.txt` under Python 3.12.13. Contract-type
+training is single-threaded, and the publish workflow fixes the common BLAS
+thread controls to `1`, because parallel reduction order can otherwise change
+serialized floating-point coefficients by a few ULPs. The workflow performs a
+second clean build and requires the two artifacts to be byte-identical before
+publishing. Those bytes must then pass the same quality gates under both the
+minimum artifact ABI and the latest locked runtime.
+
+## 2. Fresh setup
+
+From the repository root:
 
 ```bash
-cd /Users/jackeames/Downloads/LexNLP
-uv python install 3.11
-uv venv --python 3.11 .venv
-uv pip install --python .venv/bin/python -e ".[dev,test]"
+uv python install 3.12
+uv sync --frozen --python 3.12 --extra dev --extra test
 ```
 
-## 3) Bootstrap Required Assets
+`uv sync` creates `.venv` and installs the project editable. Use
+`--no-editable` for a closer approximation to an installed distribution.
+
+After an intentional dependency change:
 
 ```bash
-# NLTK + required model artifact
-./.venv/bin/python scripts/bootstrap_assets.py --nltk --contract-model
-
-# Optional: Stanford assets for Stanford-gated tests
-./.venv/bin/python scripts/bootstrap_assets.py --stanford
-
-# Optional: Tika jars
-./.venv/bin/python scripts/bootstrap_assets.py --tika
+uv lock
+uv lock --check
+uv sync --frozen --python 3.12 --extra dev --extra test
+uv pip check --python .venv/bin/python
 ```
 
-## 4) Policy Checks
+Never hand-edit `uv.lock`.
+
+`uv` environments do not require pip. Use `uv pip` for dependency checks and
+ad-hoc installation; use `uv sync --frozen` to restore the locked development
+environment. Request all desired extras in the same sync command, because
+sync removes packages that are not in the selected dependency set.
+
+## 3. Bootstrap resources
+
+### Required for the complete base test suite
 
 ```bash
-# Fail if unapproved skip/skipif/xfail markers were added
-./.venv/bin/python ci/skip_audit.py
+.venv/bin/python scripts/bootstrap_assets.py \
+  --nltk \
+  --contract-model \
+  --contract-type-model
 ```
 
-## 5) Full Validation (100% pass target)
+- NLTK language data is installed outside the Python distribution.
+- The is-contract bootstrap uses the pinned `0.1` release as its trusted
+  source. It downloads `0.2` when published; before publication it generates a
+  local `0.2` re-export from `0.1`.
+- The contract-type bootstrap builds or reuses its runtime artifact from a
+  pinned corpus.
+- Bundled segmentation/extraction models already ship in the distribution and
+  must not be downloaded into the source tree.
+
+Changing the repository alone intentionally fails closed: the configured
+repository must match the identity in the trusted asset manifest. For a fork
+or trusted mirror, set the repository and provide a locally reviewed manifest
+whose repository identity, tags, filenames, sizes, and SHA-256 digests describe
+that mirror:
 
 ```bash
-# Base suite
-./.venv/bin/pytest lexnlp
+export LEXNLP_MODELS_REPO_SLUG="<owner>/<repository>"
+export LEXNLP_ASSET_MANIFEST="/path/to/reviewed-release_asset_manifest.json"
+```
 
-# Stanford-only suite (requires Stanford assets + Java)
-PATH=/opt/homebrew/opt/openjdk/bin:$PATH \
-LEXNLP_USE_STANFORD=true \
-./.venv/bin/pytest \
+Or use a full GitHub API tags endpoint with the same reviewed manifest:
+
+```bash
+export LEXNLP_MODELS_REPO="https://api.github.com/repos/<owner>/<repository>/releases/tags/"
+export LEXNLP_ASSET_MANIFEST="/path/to/reviewed-release_asset_manifest.json"
+```
+
+`LEXNLP_ASSET_MANIFEST` is a local trust root; do not download it implicitly
+from the mirror being authorized. Publish workflows may deliberately use the
+upstream repository override for trusted source inputs while publishing their
+new output to `github.repository`. That source selection does not authorize a
+different runtime mirror.
+
+### Optional Stanford NLP
+
+Stanford-dependent extractors require Java and the pinned legacy Stanford
+assets:
+
+```bash
+.venv/bin/python scripts/bootstrap_assets.py --stanford
+```
+
+The default destination is `stanford_nlp/` below the NLTK downloader's selected
+data directory. Runtime discovery searches the configured `nltk.data.path`
+roots, looking below `stanford_nlp/` and directly below each root, then the
+legacy `/usr/lexnlp/libs/stanford_nlp` and checkout `libs/stanford_nlp` locations.
+Installing assets does not automatically extend NLTK's runtime trust path.
+
+For a custom destination, explicitly configure a trusted NLTK data root before
+bootstrap and runtime use:
+
+```bash
+export NLTK_DATA="/path/to/trusted-nlp-data"
+mkdir -p "$NLTK_DATA"
+.venv/bin/python scripts/bootstrap_assets.py \
+  --nltk --stanford \
+  --stanford-dir "$NLTK_DATA/stanford_nlp"
+```
+
+Alternatively, include a custom `--stanford-dir` itself in `NLTK_DATA`. Retain
+any other required NLTK data roots in that variable, using the platform's path
+separator (`:` on Unix, `;` on Windows). A wrapper override such as
+`STANFORD_NLP_PATH` changes the download destination; runtime discovery still
+requires the corresponding trusted NLTK data path. Only point these settings
+at verified assets you control.
+
+### Optional Apache Tika
+
+Tika is an out-of-process document parsing service, not a dependency of core
+LexNLP extraction. The bootstrap downloads and SHA-512 verifies Apache Tika
+3.3.2's app and server-standard jars:
+
+```bash
+.venv/bin/python scripts/bootstrap_assets.py --tika
+LEXNLP_USE_TIKA=true scripts/run_tika.sh
+```
+
+The launcher:
+
+- finds `bin/` relative to the repository rather than the caller's directory;
+- binds to `127.0.0.1`;
+- verifies the exact Tika version through its HTTP endpoint; and
+- refuses to replace an unrelated process already using the port.
+
+Override the default port with `APACHE_TIKA_PORT`; override the binaries
+directory with `APACHE_TIKA_BINARIES`.
+
+Stanford, Tika, model, and corpus release assets are pinned, verified, and
+installed atomically. NLTK resources come from the official `nltk_data`
+repository and are verified with a separate pinned SHA-256 catalog, including
+`omw-1.4` and `omw-2.0`; they are not covered by the model/corpus release-asset
+manifest. Do not substitute a floating URL, unverified archive extraction, or
+a committed third-party asset tree for protected assets.
+
+## 4. Required validation
+
+### Static and policy checks
+
+```bash
+.venv/bin/ruff check lexnlp scripts ci --select E4,E7,E9,F
+.venv/bin/python ci/skip_audit.py
+.venv/bin/python scripts/reexport_bundled_sklearn_models.py --check-current
+```
+
+The skip audit forbids unapproved `skip`, `skipif`, and `xfail` markers. A
+genuine external limitation requires an inline annotation:
+
+```text
+skip-audit: issue=<link-or-id> expires=YYYY-MM-DD
+```
+
+### Tests
+
+```bash
+.venv/bin/pytest lexnlp scripts/tests
+```
+
+After provisioning Stanford assets and Java:
+
+```bash
+LEXNLP_USE_STANFORD=true .venv/bin/pytest \
   lexnlp/nlp/en/tests/test_stanford.py \
   lexnlp/extract/en/entities/tests/test_stanford_ner.py
 ```
 
-Passing both commands is the required 100% result for a fully provisioned environment.
+Required suites have a 100% pass target. Do not alter test markers, fixtures,
+expected extraction output, or metric baselines to hide a regression.
 
-## 6) Packaging Validation
+### Documentation
+
+```bash
+uv sync --frozen --python 3.12 --extra dev --extra test --extra docs
+.venv/bin/sphinx-build -W --keep-going \
+  -b html documentation/docs/source documentation/docs/build/html
+```
+
+Read the Docs uses the same locked `docs` extra through `.readthedocs.yaml`.
+
+## 5. Distribution validation
+
+Build both artifacts and inspect their contents:
 
 ```bash
 uv build
-python3 ci/check_dist_contents.py
-uv venv --python 3.11 .venv-smoke
-uv pip install --python .venv-smoke/bin/python dist/*.whl
-.venv-smoke/bin/python -c "import lexnlp; print(lexnlp.__version__)"
+.venv/bin/python ci/check_dist_contents.py
 ```
 
-## 7) Model Upgrade Quality Gate
-
-Use the quality gate script before adopting a new contract-model artifact.
-
-The committed baseline metrics file is:
-- `test_data/model_quality/is_contract_baseline_metrics.json`
-
-To create a modern candidate artifact by re-serializing the baseline model
-under the current runtime (Python/scikit-learn), use:
+Install the wheel and sdist independently in clean environments outside the
+source tree. Both installs must expose the same runtime package data and model
+assets:
 
 ```bash
-./.venv/bin/python scripts/reexport_contract_model.py \
-  --source-tag pipeline/is-contract/0.1 \
-  --target-tag pipeline/is-contract/0.2 \
-  --baseline-metrics-json test_data/model_quality/is_contract_baseline_metrics.json
+uv venv /tmp/lexnlp-wheel --python 3.12
+uv pip install --python /tmp/lexnlp-wheel/bin/python dist/*.whl
+
+uv venv /tmp/lexnlp-sdist --python 3.12
+uv pip install --python /tmp/lexnlp-sdist/bin/python dist/*.tar.gz
 ```
 
-This writes model-export metadata to
-`artifacts/model_reexports/pipeline__is-contract__0.2.metadata.json` by default.
-
-Candidate evaluation command:
+Run `ci/check_dist_contents.py --installed` as used by CI and smoke-import
+`lexnlp` from a directory outside the repository. For example, from the
+repository root:
 
 ```bash
-./.venv/bin/python scripts/model_quality_gate.py \
+/tmp/lexnlp-wheel/bin/python -I ci/check_dist_contents.py --installed
+/tmp/lexnlp-sdist/bin/python -I ci/check_dist_contents.py --installed
+(cd /tmp && /tmp/lexnlp-wheel/bin/python -I -c 'import lexnlp; print(lexnlp.__version__)')
+(cd /tmp && /tmp/lexnlp-sdist/bin/python -I -c 'import lexnlp; print(lexnlp.__version__)')
+```
+
+The `-I` flag prevents the source checkout and `PYTHONPATH` from masking the
+installed distribution during these checks.
+
+## 6. Persisted-model ABI policy
+
+Pickle/joblib files encode Python imports and numerical-library internals.
+They are executable data: only load models from a trusted LexNLP release or
+another trusted producer.
+
+Every bundled or published model must be serialized with the exact producer
+stack in `constraints/model-artifact-abi.txt`:
+
+| Component | Producer version |
+| --- | --- |
+| joblib | 1.5.0 |
+| NumPy | 1.26.4 |
+| pandas | 2.2.0 |
+| scikit-learn | 1.7.2 |
+| SciPy | 1.13.0 |
+| threadpoolctl | 3.6.0 |
+
+This is the oldest supported numerical ABI, not the latest development
+environment. A model serialized under NumPy 2.x may import `numpy._core` and
+fail under the supported NumPy 1.26 lower bound.
+
+The release rule is therefore two-sided:
+
+1. produce and quality-test the artifact under the exact constrained stack;
+2. direct-load, predict, and repeat the quality gate under the latest locked
+   stack.
+
+The model scripts enforce and record producer versions, artifact SHA-256, and
+size. Do not bypass that check.
+
+### Bundled sklearn artifacts
+
+Check that all committed artifacts already match the supported runtime:
+
+```bash
+.venv/bin/python scripts/reexport_bundled_sklearn_models.py --check-current
+```
+
+Only re-export them from the constrained producer environment:
+
+```bash
+uv python install 3.12.13
+uv venv /tmp/lexnlp-model-producer --python 3.12.13
+uv pip install \
+  --python /tmp/lexnlp-model-producer/bin/python \
+  --constraint constraints/model-artifact-abi.txt \
+  -e .
+/tmp/lexnlp-model-producer/bin/python \
+  scripts/reexport_bundled_sklearn_models.py
+```
+
+Review the provenance file and prove direct-load/prediction parity under both
+the producer and latest locked environments before committing binary changes.
+
+## 7. Strict pipeline-model quality gates
+
+Quality gates compare fixed fixtures and committed metrics. Every allowed
+regression remains exactly `0.0`.
+
+### Is-contract model
+
+```bash
+.venv/bin/python scripts/model_quality_gate.py \
   --baseline-tag pipeline/is-contract/0.1 \
   --candidate-tag pipeline/is-contract/0.2 \
   --baseline-metrics-json test_data/model_quality/is_contract_baseline_metrics.json \
-  --fixture test_data/lexnlp/extract/en/contracts/tests/test_contracts/test_is_contract.csv \
-  --max-f1-regression 0.0 \
-  --max-accuracy-regression 0.0
+  --output-json artifacts/model_quality_gate.json \
+  --max-accuracy-regression 0.0 \
+  --max-f1-regression 0.0
 ```
 
-Default policy is non-regression against baseline metrics from
-`pipeline/is-contract/0.1` on the fixed fixture above.
-
-If baseline-tag model behavior is intentionally changed, regenerate and review
-the baseline metrics file in the same PR:
+To produce a candidate under the constrained stack:
 
 ```bash
-./.venv/bin/python scripts/model_quality_gate.py \
-  --baseline-tag pipeline/is-contract/0.1 \
-  --candidate-tag pipeline/is-contract/0.1 \
-  --fixture test_data/lexnlp/extract/en/contracts/tests/test_contracts/test_is_contract.csv \
-  --write-baseline-metrics-json test_data/model_quality/is_contract_baseline_metrics.json
+/tmp/lexnlp-model-producer/bin/python scripts/reexport_contract_model.py \
+  --source-tag pipeline/is-contract/0.1 \
+  --target-tag pipeline/is-contract/0.2 \
+  --baseline-metrics-json test_data/model_quality/is_contract_baseline_metrics.json \
+  --force
 ```
 
-### Refresh bundled sklearn artifacts
+Set `LEXNLP_IS_CONTRACT_MODEL_TAG` to select a validated candidate without an
+API change.
 
-If bundled sklearn artifacts emit legacy-version warnings, re-serialize them on
-the current runtime and re-run targeted tests. Example for date parser model:
+### Contract-type model
 
 ```bash
-./.venv/bin/python - <<'PY'
-import joblib
-joblib.dump(joblib.load("lexnlp/extract/en/date_model.pickle"), "lexnlp/extract/en/date_model.pickle", compress=3)
-PY
+.venv/bin/python scripts/contract_type_quality_gate.py \
+  --baseline-tag pipeline/contract-type/0.2-runtime \
+  --candidate-tag pipeline/contract-type/0.2-runtime \
+  --baseline-metrics-json test_data/model_quality/contract_type_baseline_metrics.json \
+  --output-json artifacts/contract_type_quality_gate.json \
+  --max-accuracy-top1-regression 0.0 \
+  --max-accuracy-topn-regression 0.0 \
+  --max-f1-macro-regression 0.0 \
+  --max-f1-weighted-regression 0.0
 ```
 
-## 8) Failure Triage
+Train a release candidate only under the constrained producer stack:
 
-- `LookupError` for NLTK resources:
-  - Re-run `scripts/bootstrap_assets.py --nltk`
-- Contract tests failing with missing model tag:
-  - Re-run `scripts/bootstrap_assets.py --contract-model`
-- Stanford tests failing due missing jars/models:
-  - Re-run `scripts/bootstrap_assets.py --stanford`
-- Skip-audit failure:
-  - Remove the marker, or add annotation:
-    - `# skip-audit: issue=<ticket> expires=YYYY-MM-DD`
-  - For approved legacy skips only, update `ci/skip_audit_allowlist.txt`
-- Packaging smoke failure:
-  - Ensure build artifacts are generated with `uv build` and install into a clean venv
+```bash
+/tmp/lexnlp-model-producer/bin/python scripts/train_contract_type_model.py \
+  --target-tag pipeline/contract-type/0.2-runtime \
+  --force \
+  --output-json artifacts/model_training/contract_type_model_training_report.json
+```
+
+Set `LEXNLP_CONTRACT_TYPE_MODEL_TAG` to select a validated candidate.
+
+Do not rewrite baseline JSON merely because a candidate regressed. A baseline
+change requires an intentional, reviewed behavior change with evidence that
+quality improved or remained equal.
+
+### First publication of trusted model tags
+
+The packaged and drift-check manifests already pin the exact reproducible
+bytes for `pipeline/is-contract/0.2` and
+`pipeline/contract-type/0.2-runtime`. After the code change first lands in the
+upstream repository, dispatch both model publish workflows promptly. Until a
+release exists, bootstrap treats an HTTP 404 for those exact default tags as a
+staged-publication condition and deterministically rebuilds the same tag from
+its pinned source; custom tags and all other trust failures remain fatal.
+
+The scheduled asset-drift workflow is intentionally strict and will fail while
+a manifest-pinned release is absent or has different bytes. Do not weaken that
+check: publish the byte-identical artifact, verify its size and SHA-256 against
+the manifest, then run the drift workflow manually once.
+
+## 8. Minimum and latest dependency checks
+
+Dependency bounds are promises. CI installs the declared direct lower bounds
+and runs:
+
+- bundled model compatibility;
+- direct-load and prediction for both external models;
+- both strict quality gates; and
+- the complete base suite.
+
+The normal locked environment covers the latest resolved stack. For every
+dependency update, test both ends. Python compatibility changes also require
+the full 3.10, 3.11, 3.12, and 3.13 matrix.
+
+### Dependency vulnerability audit
+
+The strict `pip-audit` report remains visible in CI logs and uploaded artifacts.
+`ci/check_dependency_audit.py` assesses only the reviewed applicability
+exceptions in `ci/dependency_audit_exceptions.json`; it rejects missing,
+incomplete, or skipped reports and unexpected findings. Version, affected-source
+fingerprint, and expiry changes also fail closed and require a fresh review.
+
+The current exception is **NLTK 3.10.3**, advisory
+**GHSA-8mgp-746c-j5xp** (aliases **CVE-2026-81726** and **PYSEC-2026-3740**),
+expiring **30 October 2026**. NLTK remains a vulnerable dependency. The affected
+model-persistence APIs (`TransitionParser.train/parse`,
+`AveragedPerceptron.save/load`, `PerceptronTagger.save_to_json`, and
+`save_maxent_params`) are not reached by the reviewed shipped LexNLP
+inference/training paths. LexNLP POS/NER inference loads pretrained resources
+from trusted operator-configured data/model roots instead.
+
+This disposition is specific to those LexNLP call paths. Downstream code that
+directly calls the affected NLTK persistence APIs remains vulnerable and is
+outside the exception's scope. Prefer a patched upstream NLTK release when
+one becomes available, then rerun compatibility checks and remove the exception.
+
+## 9. Failure triage
+
+- **NLTK `LookupError`:** rerun `scripts/bootstrap_assets.py --nltk` in the
+  same environment/user data location.
+- **Missing contract tag:** rerun the matching `--contract-model` or
+  `--contract-type-model` bootstrap.
+- **Model imports `numpy._core`:** it was produced with an unsupported newer
+  NumPy ABI; restore the trusted artifact and rebuild with
+  `constraints/model-artifact-abi.txt`.
+- **Model metric regression:** reject or improve the candidate; do not loosen
+  a threshold.
+- **Stanford missing jar/model:** rerun the verified `--stanford` bootstrap and
+  confirm Java is on `PATH`.
+- **Tika unavailable:** rerun `--tika`, then
+  `LEXNLP_USE_TIKA=true scripts/run_tika.sh`; inspect
+  `/tmp/tika-server-3.3.2.log`.
+- **Skip audit failure:** remove the marker or provide a traceable,
+  time-limited annotation.
+- **Distribution mismatch:** rebuild from a clean tree and compare wheel/sdist
+  package data before changing the checker.
+- **Read the Docs failure:** reproduce with the fatal-warning Sphinx command
+  above and keep `.readthedocs.yaml`, `pyproject.toml`, and `uv.lock` aligned.
